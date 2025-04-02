@@ -84,6 +84,7 @@ pub(crate) const BNO055_OPR_MODE: u8 = 0x3D;
 pub(crate) const BNO055_PWR_MODE: u8 = 0x3E;
 
 pub(crate) const BNO055_SYS_TRIGGER: u8 = 0x3F;
+pub(crate) const BNO055_SYS_TRIGGER_RST_INT_BIT: u8 = 0x40; // Clear interrupts command
 pub(crate) const BNO055_SYS_TRIGGER_RST_SYS_BIT: u8 = 0x20; // Reset command
 pub(crate) const BNO055_SYS_TRIGGER_SELF_TEST_BIT: u8 = 0b000_0001; // Self-test command
 pub(crate) const BNO055_TEMP_SOURCE: u8 = 0x40;
@@ -117,6 +118,25 @@ pub(crate) const BNO055_ACC_RADIUS_LSB: u8 = 0x67;
 pub(crate) const BNO055_ACC_RADIUS_MSB: u8 = 0x68;
 pub(crate) const BNO055_MAG_RADIUS_LSB: u8 = 0x69;
 pub(crate) const BNO055_MAG_RADIUS_MSB: u8 = 0x6A;
+
+/// Interrupts
+pub(crate) const BNO055_INT_MSK: u8 = 0x0F;
+pub(crate) const BNO055_INT_EN: u8 = 0x10;
+pub(crate) const BNO055_ACC_AM_THRES: u8 = 0x11;
+pub(crate) const BNO055_ACC_INT_SETTING: u8 = 0x12;
+pub(crate) const BNO055_ACC_HG_DURATION: u8 = 0x13;
+pub(crate) const BNO055_ACC_HG_THRES: u8 = 0x14;
+pub(crate) const BNO055_ACC_NM_THRES: u8 = 0x15;
+pub(crate) const BNO055_ACC_NM_SET: u8 = 0x16;
+pub(crate) const BNO055_GYR_INT_SETTING: u8 = 0x17;
+pub(crate) const BNO055_GYR_HR_X_SET: u8 = 0x18;
+pub(crate) const BNO055_GYR_DUR_X: u8 = 0x19;
+pub(crate) const BNO055_GYR_HR_Y_SET: u8 = 0x1A;
+pub(crate) const BNO055_GYR_DUR_Y: u8 = 0x1B;
+pub(crate) const BNO055_GYR_HR_Z_SET: u8 = 0x1C;
+pub(crate) const BNO055_GYR_DUR_Z: u8 = 0x1D;
+pub(crate) const BNO055_GYR_AM_THRES: u8 = 0x1E;
+pub(crate) const BNO055_GYR_AM_SET: u8 = 0x1F;
 
 /// Sensor config
 pub(crate) const BNO055_ACC_CONFIG: u8 = 0x08;

@@ -51,6 +51,59 @@ pub struct Bno055<I> {
     use_default_addr: bool,
 }
 
+macro_rules! set_u8_from {
+    ($bno055 : expr, $page : expr, $reg : expr, $x : expr) => {{
+        $bno055.set_page($page)?;
+        $bno055.write_u8($reg, $x.into()).map_err(Error::I2c)?;
+        Ok(())
+    }};
+}
+
+macro_rules! set_config_from {
+    ($bno055 : expr, $page : expr, $reg : expr, $x : expr, $delay : expr) => {{
+        let prev = $bno055.mode;
+        $bno055.set_mode(BNO055OperationMode::CONFIG_MODE, $delay)?;
+        let res = set_u8_from!($bno055, $page, $reg, $x);
+        $bno055.set_mode(prev, $delay)?;
+        res
+    }};
+}
+
+macro_rules! read_u8_into {
+    ($bno055 : expr, $page : expr, $reg : expr) => {{
+        $bno055.set_page($page)?;
+        let regval = $bno055.read_u8($reg).map_err(Error::I2c)?;
+        Ok(regval.into())
+    }};
+}
+
+macro_rules! write_flags {
+    ($bno055 : expr, $page : expr, $reg : expr, $flags : expr) => {{
+        $bno055.set_page($page)?;
+        $bno055.write_u8($reg, $flags.bits()).map_err(Error::I2c)?;
+        Ok(())
+    }};
+}
+
+macro_rules! write_config_flags {
+    ($bno055 : expr, $page : expr, $reg : expr, $flags : expr, $delay : expr) => {{
+        let prev = $bno055.mode;
+        $bno055.set_mode(BNO055OperationMode::CONFIG_MODE, $delay)?;
+        let res = write_flags!($bno055, $page, $reg, $flags);
+        $bno055.set_mode(prev, $delay)?;
+        res
+    }};
+}
+
+macro_rules! read_flags {
+    ($bno055 : expr, $page : expr, $reg : expr, $flag_type : ty) => {{
+        $bno055.set_page($page)?;
+        let flags = $bno055.read_u8($reg).map_err(Error::I2c)?;
+        let flags = <$flag_type>::from_bits_truncate(flags);
+        Ok(flags)
+    }};
+}
+
 impl<I, E> Bno055<I>
 where
     I: I2c<SevenBitAddress, Error = E>,
@@ -634,6 +687,419 @@ where
         Ok(temp)
     }
 
+    /// Read which interrupts are currently triggered/active
+    pub fn interrupts_triggered(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        read_flags!(
+            self,
+            BNO055RegisterPage::PAGE_0,
+            regs::BNO055_INT_STA,
+            BNO055Interrupt
+        )
+    }
+
+    /// Resets the interrupts register and the INT pin
+    pub fn clear_interrupts(&mut self) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0)?;
+        self.write_u8(
+            regs::BNO055_SYS_TRIGGER,
+            regs::BNO055_SYS_TRIGGER_RST_INT_BIT,
+        )
+        .map_err(Error::I2c)?;
+        Ok(())
+    }
+
+    /// Sets which interrupts are enabled
+    /// One of the only config options that dont need to be in config mode to write to
+    pub fn set_interrupts_enabled(&mut self, interrupts: BNO055Interrupt) -> Result<(), Error<E>> {
+        write_flags!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_INT_EN,
+            interrupts
+        )
+    }
+
+    /// Returns currently enabled interrupts
+    pub fn interrupts_enabled(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        read_flags!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_INT_EN,
+            BNO055Interrupt
+        )
+    }
+
+    /// Sets interrupts mask
+    /// Official doc: when mask=1, the interrupt will update INT_STA register and trigger a change in INT pin,
+    /// When mask=0, only INT_STA register will be updated
+    /// One of the only config options that dont need to be in config mode to write to
+    pub fn set_interrupts_mask(&mut self, mask: BNO055Interrupt) -> Result<(), Error<E>> {
+        write_flags!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK, mask)
+    }
+
+    /// Returns the current interrupts mask
+    pub fn interrupts_mask(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        read_flags!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_INT_MSK,
+            BNO055Interrupt
+        )
+    }
+
+    /// Returns current accelerometer config settings
+    pub fn acc_config(&mut self) -> Result<BNO055AccConfig, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_CONFIG)
+    }
+
+    /// Sets accelerometer config settings
+    pub fn set_acc_config(
+        &mut self,
+        cfg: BNO055AccConfig,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_CONFIG,
+            cfg,
+            delay
+        )
+    }
+
+    /// Sets accelerometer interrupt settings
+    pub fn set_acc_interrupt_settings(
+        &mut self,
+        settings: BNO055AccIntSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_INT_SETTING,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer interrupt settings
+    pub fn acc_interrupt_settings(&mut self) -> Result<BNO055AccIntSettings, Error<E>> {
+        read_u8_into!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_INT_SETTING
+        )
+    }
+
+    /// Sets accelerometer any motion interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn set_acc_am_threshold(
+        &mut self,
+        mult: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_AM_THRES,
+            mult,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer any motion interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn acc_am_threshold(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_AM_THRES)
+    }
+
+    /// Sets accelerometer High-G interrupt duration setting
+    pub fn set_acc_hg_duration(
+        &mut self,
+        dur: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_HG_DURATION,
+            dur,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer High-G interrupt duration setting
+    pub fn acc_hg_duration(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_HG_DURATION
+        )
+    }
+
+    /// Sets accelerometer High-G interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn set_acc_hg_threshold(
+        &mut self,
+        mult: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_HG_THRES,
+            mult,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer High-G interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn acc_hg_threshold(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_HG_THRES)
+    }
+
+    /// Sets accelerometer no/slow-motion interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn set_acc_nm_threshold(
+        &mut self,
+        mult: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_NM_THRES,
+            mult,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer no/slow-motion interrupt threshold setting
+    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
+    pub fn acc_nm_threshold(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_THRES)
+    }
+
+    /// Sets accelerometer no/slow-motion interrupt settings
+    pub fn set_acc_nm_settings(
+        &mut self,
+        settings: BNO055AccNmSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_NM_SET,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current accelerometer no/slow-motion interrupt settings
+    pub fn acc_nm_settings(&mut self) -> Result<BNO055AccNmSettings, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_SET)
+    }
+
+    /// Sets gyroscope interrupt settings
+    pub fn set_gyr_interrupt_settings(
+        &mut self,
+        settings: BNO055GyrIntSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        write_config_flags!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_INT_SETTING,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns the current gyroscope interrupt settings
+    pub fn gyr_interrupt_settings(&mut self) -> Result<BNO055GyrIntSettings, Error<E>> {
+        read_flags!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_INT_SETTING,
+            BNO055GyrIntSettings
+        )
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for x-axis
+    pub fn set_gyr_hr_x_settings(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_X_SET,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for x-axis
+    pub fn gyr_hr_x_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_X_SET)
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for x-axis
+    /// Actual duration is (`duration` + 1) * 2.5ms
+    pub fn set_gyr_dur_x(
+        &mut self,
+        duration: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_X,
+            duration,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for x-axis
+    /// Actual duration is (result + 1) * 2.5ms
+    pub fn gyr_dur_x(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_X)
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for y-axis
+    pub fn set_gyr_hr_y_settings(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_Y_SET,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for y-axis
+    pub fn gyr_hr_y_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Y_SET)
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for y-axis
+    /// Actual duration is (`duration` + 1) * 2.5ms
+    pub fn set_gyr_dur_y(
+        &mut self,
+        duration: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_Y,
+            duration,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for y-axis
+    /// Actual duration is (result + 1) * 2.5ms
+    pub fn gyr_dur_y(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Y)
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for z-axis
+    pub fn set_gyr_hr_z_settings(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_Z_SET,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    pub fn gyr_hr_z_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Z_SET)
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for z-axis
+    /// Actual duration is (`duration` + 1) * 2.5ms
+    pub fn set_gyr_dur_z(
+        &mut self,
+        duration: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_Z,
+            duration,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    /// Actual duration is (result + 1) * 2.5ms
+    pub fn gyr_dur_z(&mut self) -> Result<u8, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Z)
+    }
+
+    /// Sets gyroscope any-motion interrupt threshold
+    /// Actual value is `mult` * base-unit based on gyroscope range set in GYR_CONFIG_0
+    pub fn set_gyr_am_threshold(
+        &mut self,
+        mult: u8,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        let mut mult = mult;
+        if mult > 0b01111111 {
+            mult = 0b01111111;
+        }
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_Z,
+            mult & BIT_7_RESERVED_MASK,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    /// Actual value is `mult` * base-unit based on gyroscope range set in GYR_CONFIG_0
+    pub fn gyr_am_threshold(&mut self) -> Result<u8, Error<E>> {
+        let res: Result<u8, Error<E>> =
+            read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Z);
+        res.map(|mult| BIT_7_RESERVED_MASK & mult)
+    }
+
+    /// Sets gyroscope any-motion interrupt settings
+    pub fn set_gyr_am_settings(
+        &mut self,
+        settings: BNO055GyrAmSettings,
+        delay: &mut dyn DelayMs<u16>,
+    ) -> Result<(), Error<E>> {
+        set_config_from!(
+            self,
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_AM_SET,
+            settings,
+            delay
+        )
+    }
+
+    /// Returns current gyroscope any-motion interrupt settings
+    pub fn gyr_am_settings(&mut self) -> Result<BNO055GyrAmSettings, Error<E>> {
+        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_AM_SET)
+    }
+
     #[inline(always)]
     fn i2c_addr(&self) -> u8 {
         if !self.use_default_addr {
@@ -944,6 +1410,7 @@ bitflags! {
     }
 }
 
+
 impl BNO055OperationMode {
     fn is_fusion_enabled(&self) -> bool {
         matches!(
@@ -992,5 +1459,340 @@ impl BNO055OperationMode {
                 | Self::NDOF_FMC_OFF
                 | Self::NDOF,
         )
+    }
+}
+
+bitflags! {
+    /// BNO055 interrupt enable/mask flags.
+    pub struct BNO055Interrupt: u8 {
+        const ACC_NM = 0b10000000;
+        const ACC_AM = 0b01000000;
+        const ACC_HIGH_G = 0b00100000;
+        const GYR_DRDY = 0b00010000;
+        const GYR_HIGH_RATE = 0b00001000;
+        const GYRO_AM = 0b00000100;
+        const MAG_DRDY = 0b00000010;
+        const ACC_BSX_DRDY = 0b00000001;
+    }
+}
+
+bitflags! {
+    /// BNO055 accelerometer interrupt settings
+    pub struct BNO055AccIntSettingsFlags: u8 {
+        const HG_Z_AXIS = 0b10000000;
+        const HG_Y_AXIS = 0b01000000;
+        const HG_X_AXIS = 0b00100000;
+        const AMNM_Z_AXIS = 0b00010000;
+        const AMNM_Y_AXIS = 0b00001000;
+        const AMNM_X_AXIS = 0b00000100;
+    }
+}
+
+const BIT_7_RESERVED_MASK: u8 = 0b01111111;
+
+#[derive(Debug)]
+pub struct BNO055AccIntSettings {
+    pub flags: BNO055AccIntSettingsFlags,
+    /// `am_dur` in [0, 3]
+    pub am_dur: u8,
+}
+
+impl From<u8> for BNO055AccIntSettings {
+    fn from(regval: u8) -> Self {
+        Self {
+            flags: BNO055AccIntSettingsFlags::from_bits_truncate(regval),
+            am_dur: regval & 3,
+        }
+    }
+}
+
+impl Into<u8> for BNO055AccIntSettings {
+    fn into(self) -> u8 {
+        let mut dur = self.am_dur;
+        if dur > 3 {
+            dur = 3;
+        }
+        self.flags.bits() | dur
+    }
+}
+
+#[derive(Debug)]
+pub struct BNO055AccNmSettings {
+    /// `dur` in [0, 0b111111]. Details of how actual duration is calculated in official doc
+    pub dur: u8,
+    /// true - no motion, false - slow motion
+    pub is_no_motion: bool,
+}
+
+impl From<u8> for BNO055AccNmSettings {
+    fn from(regval: u8) -> Self {
+        Self {
+            dur: (regval & 0b01111110) >> 1,
+            is_no_motion: match regval & 1 {
+                0 => false,
+                _ => true,
+            },
+        }
+    }
+}
+
+impl Into<u8> for BNO055AccNmSettings {
+    fn into(self) -> u8 {
+        let mut dur = self.dur;
+        if dur > 0b111111 {
+            dur = 0b111111;
+        }
+        let is_no_motion = match self.is_no_motion {
+            true => 1,
+            false => 0,
+        };
+        BIT_7_RESERVED_MASK & ((dur << 1) | is_no_motion)
+    }
+}
+
+bitflags! {
+    /// BNO055 gyroscope interrupt settings
+    pub struct BNO055GyrIntSettings: u8 {
+        const HR_FILT = 0b10000000;
+        const AM_FILT = 0b01000000;
+        const HR_Z_AXIS = 0b00100000;
+        const HR_Y_AXIS = 0b00010000;
+        const HR_X_AXIS = 0b00001000;
+        const AM_Z_AXIS = 0b00000100;
+        const AM_Y_AXIS = 0b00000010;
+        const AM_X_AXIS = 0b00000001;
+    }
+}
+
+/// Gyroscope High Rate interrupt settings
+#[derive(Debug)]
+pub struct BNO055GyrHrSettings {
+    /// `hysteresis` in [0, 0b11]. Actual value is `hysteresis` * base-unit based on gyroscope range set in GYR_CONFIG
+    pub hysteresis: u8,
+    /// `threshold` in [0, 0b11111]. Actual value is `threshold` * base-unit based on gyroscope range set in GYR_CONFIG
+    pub threshold: u8,
+}
+
+impl From<u8> for BNO055GyrHrSettings {
+    fn from(regval: u8) -> Self {
+        Self {
+            hysteresis: (regval & 0b01100000) >> 5,
+            threshold: regval & 0b00011111,
+        }
+    }
+}
+
+impl Into<u8> for BNO055GyrHrSettings {
+    fn into(self) -> u8 {
+        let mut hysteresis = self.hysteresis;
+        if hysteresis > 0b11 {
+            hysteresis = 0b11;
+        }
+        let mut threshold = self.threshold;
+        if threshold > 0b11111 {
+            threshold = 0b11111;
+        }
+        BIT_7_RESERVED_MASK & (hysteresis << 5 | threshold)
+    }
+}
+
+/// Gyroscope Any Motion interrupt settings
+#[derive(Debug)]
+pub struct BNO055GyrAmSettings {
+    pub awake_duration: GyrAmSamplesAwake,
+    /// `slope_samples` in [0, 0b11]. Actual value is (`slope_samples` + 1) * 4
+    pub slope_samples: u8,
+}
+
+#[derive(Debug)]
+pub enum GyrAmSamplesAwake {
+    Samples8,
+    Samples16,
+    Samples32,
+    Samples64,
+}
+
+impl From<u8> for GyrAmSamplesAwake {
+    fn from(regval: u8) -> Self {
+        match regval {
+            0 => Self::Samples8,
+            1 => Self::Samples16,
+            2 => Self::Samples32,
+            3 => Self::Samples64,
+            _ => Self::Samples8, // TODO: handle error case?
+        }
+    }
+}
+
+impl Into<u8> for GyrAmSamplesAwake {
+    fn into(self) -> u8 {
+        match self {
+            Self::Samples8 => 0,
+            Self::Samples16 => 1,
+            Self::Samples32 => 2,
+            Self::Samples64 => 3,
+        }
+    }
+}
+
+impl From<u8> for BNO055GyrAmSettings {
+    fn from(regval: u8) -> Self {
+        Self {
+            awake_duration: ((regval >> 2) & 3).into(),
+            slope_samples: regval & 3,
+        }
+    }
+}
+
+impl Into<u8> for BNO055GyrAmSettings {
+    fn into(self) -> u8 {
+        let mut slope_samples = self.slope_samples;
+        if slope_samples > 0b11 {
+            slope_samples = 0b11;
+        }
+        let awake_duration: u8 = self.awake_duration.into();
+        0b00001111 & (awake_duration | slope_samples)
+    }
+}
+
+#[derive(Debug)]
+pub struct BNO055AccConfig {
+    pub g_range: AccGRange,
+    pub bandwidth: AccBandwidth,
+    pub op_mode: AccOperationMode,
+}
+
+impl From<u8> for BNO055AccConfig {
+    fn from(regval: u8) -> Self {
+        Self {
+            g_range: regval.into(),
+            bandwidth: regval.into(),
+            op_mode: regval.into(),
+        }
+    }
+}
+
+impl Into<u8> for BNO055AccConfig {
+    fn into(self) -> u8 {
+        let g_range_b: u8 = self.g_range.into();
+        let bandwidth_b: u8 = self.bandwidth.into();
+        let op_mode_b: u8 = self.op_mode.into();
+        g_range_b | bandwidth_b | op_mode_b
+    }
+}
+
+#[derive(Debug)]
+pub enum AccGRange {
+    TwoG,
+    FourG,
+    EightG,
+    SixteenG,
+}
+
+impl From<u8> for AccGRange {
+    fn from(regval: u8) -> Self {
+        let val = regval & 3;
+        match val {
+            0 => Self::TwoG,
+            1 => Self::FourG,
+            2 => Self::EightG,
+            3 => Self::SixteenG,
+            _ => Self::TwoG, // TODO: handle error case?
+        }
+    }
+}
+
+impl Into<u8> for AccGRange {
+    fn into(self) -> u8 {
+        match self {
+            Self::TwoG => 0,
+            Self::FourG => 1,
+            Self::EightG => 2,
+            Self::SixteenG => 3,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum AccBandwidth {
+    Hz7_81,
+    Hz15_63,
+    Hz31_25,
+    Hz62_5,
+    Hz125,
+    Hz250,
+    Hz500,
+    Hz1000,
+}
+
+impl From<u8> for AccBandwidth {
+    fn from(regval: u8) -> Self {
+        let val = (regval >> 2) & 7;
+        match val {
+            0 => Self::Hz7_81,
+            1 => Self::Hz15_63,
+            2 => Self::Hz31_25,
+            3 => Self::Hz62_5,
+            4 => Self::Hz125,
+            5 => Self::Hz250,
+            6 => Self::Hz500,
+            7 => Self::Hz1000,
+            _ => Self::Hz7_81, // TODO: handle error case?
+        }
+    }
+}
+
+impl Into<u8> for AccBandwidth {
+    fn into(self) -> u8 {
+        let to_shift = match self {
+            Self::Hz7_81 => 0,
+            Self::Hz15_63 => 1,
+            Self::Hz31_25 => 2,
+            Self::Hz62_5 => 3,
+            Self::Hz125 => 4,
+            Self::Hz250 => 5,
+            Self::Hz500 => 6,
+            Self::Hz1000 => 7,
+        };
+        to_shift << 2
+    }
+}
+
+#[derive(Debug)]
+pub enum AccOperationMode {
+    Normal,
+    Suspend,
+    LowPower1,
+    Standby,
+    LowPower2,
+    DeepSuspend,
+}
+
+impl From<u8> for AccOperationMode {
+    fn from(regval: u8) -> Self {
+        let val = (regval >> 5) & 7;
+        match val {
+            0 => Self::Normal,
+            1 => Self::Suspend,
+            2 => Self::LowPower1,
+            3 => Self::Standby,
+            4 => Self::LowPower2,
+            5 => Self::DeepSuspend,
+            _ => Self::Normal, // TODO: handle error case?
+        }
+    }
+}
+
+impl Into<u8> for AccOperationMode {
+    fn into(self) -> u8 {
+        let to_shift = match self {
+            Self::Normal => 0,
+            Self::Suspend => 1,
+            Self::LowPower1 => 2,
+            Self::Standby => 3,
+            Self::LowPower2 => 4,
+            Self::DeepSuspend => 5,
+        };
+        to_shift << 5
     }
 }
