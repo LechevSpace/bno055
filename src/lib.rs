@@ -216,7 +216,7 @@ where
 
         self.write_u8(
             regs::BNO055_SYS_TRIGGER,
-            regs::BNO055_SYS_TRIGGER_RST_SYS_BIT,
+            BNO055SystemTrigger::RST_SYS.bits(),
         )
         .map_err(Error::I2c)?;
 
@@ -225,7 +225,44 @@ where
         Ok(())
     }
 
-    /// Sets the operating mode, see [BNO055OperationMode](enum.BNO055OperationMode.html).
+    /// Run Self-test on the BNO055
+    ///
+    /// See section 3.9.2 Built-In Self-Test (BIST)
+    ///
+    /// To know if the BIST succeeded/failed you should:
+    /// 1. Trigger BIST
+    /// 2. Wait for 400ms
+    /// 3. Read `SYS_ERROR` register (`0x3A`):
+    /// - `SYS_ERROR` will remain at 0 in case of success (0 = No error)
+    /// - `SYS_ERROR` will show 3 in case of self-test failure (3 = Self-test result failed)
+    /// 4. In case of failed BIST (`SYS_ERROR`` != 0 above), you can see which sensor
+    /// failed by reading the `ST_RESULT` (`0x36`) register (bit of the corresponding
+    /// sensor is ‘1’ if self-test was successful, but will show ‘0’ if the self-test failed).
+    ///
+    /// | Components      | Test type          |
+    /// | --------------- | ------------------ |
+    /// | Accelerometer   | built in self-test |
+    /// | Magnetometer    | built in self-test |
+    /// | Gyroscope       | built in self-test |
+    /// | Microcontroller | No test performed  |
+    pub fn self_test(&mut self, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0)?;
+
+        let prev = self.mode;
+
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
+
+        self.write_u8(
+            regs::BNO055_SYS_TRIGGER,
+            BNO055SystemTrigger::RST_SYS.bits(),
+        )
+        .map_err(Error::I2c)?;
+
+        self.set_mode(prev, delay)?;
+
+        Ok(())
+    }
+    /// Sets the operating mode, see [BNO055OperationMode].
     /// See section 3.3.
     pub fn set_mode(
         &mut self,
@@ -268,6 +305,10 @@ where
     }
 
     /// Enables/Disables usage of external 32k crystal.
+    ///
+    /// > It takes minimum ~600ms to configure the external crystal and startup the BNO055
+    ///
+    /// See section 5.5.1 External 32kHz Crystal Oscillator
     pub fn set_external_crystal(
         &mut self,
         ext: bool,
@@ -277,8 +318,15 @@ where
 
         let prev = self.mode;
         self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-        self.write_u8(regs::BNO055_SYS_TRIGGER, if ext { 0x80 } else { 0x00 })
-            .map_err(Error::I2c)?;
+        self.write_u8(
+            regs::BNO055_SYS_TRIGGER,
+            if ext {
+                BNO055SystemTrigger::EXT_CLK_SEL.bits()
+            } else {
+                0x00
+            },
+        )
+        .map_err(Error::I2c)?;
 
         self.set_mode(prev, delay)?;
 
@@ -526,7 +574,6 @@ where
         self.i2c
             .write(self.i2c_addr(), &buf_with_reg[..])
             .map_err(Error::I2c)?;
-
 
         // change operation mode to fusion mode
         self.set_mode(prev_mode, delay)?;
@@ -811,6 +858,8 @@ where
     }
 
     /// Returns current temperature of the chip (in degrees Celsius).
+    ///
+    /// By default this uses the Accelerometer temperature.
     pub fn temperature(&mut self) -> Result<i8, Error<E>> {
         self.set_page(BNO055RegisterPage::PAGE_0)?;
 
@@ -834,13 +883,14 @@ where
         self.set_page(BNO055RegisterPage::PAGE_0)?;
         self.write_u8(
             regs::BNO055_SYS_TRIGGER,
-            regs::BNO055_SYS_TRIGGER_RST_INT_BIT,
+            BNO055SystemTrigger::RST_INT.bits(),
         )
         .map_err(Error::I2c)?;
         Ok(())
     }
 
     /// Sets which interrupts are enabled
+    ///
     /// One of the only config options that dont need to be in config mode to write to
     pub fn set_interrupts_enabled(&mut self, interrupts: BNO055Interrupt) -> Result<(), Error<E>> {
         self.set_page(BNO055RegisterPage::PAGE_1)?;
@@ -943,6 +993,7 @@ where
     }
 
     /// Sets accelerometer any motion interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn set_acc_am_threshold(
         &mut self,
@@ -959,6 +1010,7 @@ where
     }
 
     /// Returns current accelerometer any motion interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn acc_am_threshold(&mut self) -> Result<u8, Error<E>> {
         read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_AM_THRES)
@@ -991,6 +1043,7 @@ where
     }
 
     /// Sets accelerometer High-G interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn set_acc_hg_threshold(
         &mut self,
@@ -1007,6 +1060,7 @@ where
     }
 
     /// Returns current accelerometer High-G interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn acc_hg_threshold(&mut self) -> Result<u8, Error<E>> {
         read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_HG_THRES)
@@ -1014,6 +1068,7 @@ where
     }
 
     /// Sets accelerometer no/slow-motion interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn set_acc_nm_threshold(
         &mut self,
@@ -1030,6 +1085,7 @@ where
     }
 
     /// Returns current accelerometer no/slow-motion interrupt threshold setting
+    ///
     /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
     pub fn acc_nm_threshold(&mut self) -> Result<u8, Error<E>> {
         read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_THRES)
@@ -1104,6 +1160,7 @@ where
     }
 
     /// Sets gyroscope high-rate interrupt duration for x-axis
+    ///
     /// Actual duration is (`duration` + 1) * 2.5ms
     pub fn set_gyr_dur_x(&mut self, duration: u8, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
         set_config_from!(
@@ -1116,6 +1173,7 @@ where
     }
 
     /// Returns current gyroscope high-rate interrupt settings for x-axis
+    ///
     /// Actual duration is (result + 1) * 2.5ms
     pub fn gyr_dur_x(&mut self) -> Result<u8, Error<E>> {
         read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_X)
@@ -1144,6 +1202,7 @@ where
     }
 
     /// Sets gyroscope high-rate interrupt duration for y-axis
+    ///
     /// Actual duration is (`duration` + 1) * 2.5ms
     pub fn set_gyr_dur_y(&mut self, duration: u8, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
         set_config_from!(
@@ -1156,6 +1215,7 @@ where
     }
 
     /// Returns current gyroscope high-rate interrupt settings for y-axis
+    ///
     /// Actual duration is (result + 1) * 2.5ms
     pub fn gyr_dur_y(&mut self) -> Result<u8, Error<E>> {
         read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Y)
@@ -1477,6 +1537,14 @@ pub struct BNO055SystemStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub struct BNO055Revision {
+    /// # Example
+    ///
+    /// For version 3.17
+    ///
+    /// ```rust
+    /// let version_reg: [u8; 2] = [3, 17];
+    /// assert_eq!(785_u16, u16::from_be_bytes(version_reg));
+    /// ```
     pub software: u16,
     pub bootloader: u8,
     pub accelerometer: u8,
@@ -1572,18 +1640,18 @@ bitflags! {
     /// Possible BNO055 operation modes.
     // #[cfg_attr(not(feature = "defmt-03"), derive(Debug, Clone, Copy, PartialEq, Eq))]
     impl BNO055OperationMode: u8 {
-        const CONFIG_MODE = 0b1_0000;
-        const ACC_ONLY = 0b1_0001;
-        const MAG_ONLY = 0b1_0010;
-        const GYRO_ONLY = 0b1_0011;
-        const ACC_MAG = 0b1_0100;
-        const ACC_GYRO = 0b1_0101;
-        const MAG_GYRO = 0b1_0110;
-        const AMG = 0b1_0111;
-        const IMU = 0b1_1000;
-        const COMPASS = 0b1_1001;
-        const M4G = 0b1_1010;
-        const NDOF_FMC_OFF = 0b1_1011;
+        const CONFIG_MODE = 0b0000;
+        const ACC_ONLY = 0b0001;
+        const MAG_ONLY = 0b0010;
+        const GYRO_ONLY = 0b0011;
+        const ACC_MAG = 0b0100;
+        const ACC_GYRO = 0b0101;
+        const MAG_GYRO = 0b0110;
+        const AMG = 0b0111;
+        const IMU = 0b1000;
+        const COMPASS = 0b1001;
+        const M4G = 0b1010;
+        const NDOF_FMC_OFF = 0b1011;
         /// 3.3.3.5 NDOF
         ///
         /// This is a fusion mode with 9 degrees of freedom where the fused absolute orientation data is
@@ -1593,7 +1661,7 @@ bitflags! {
         /// turned ON and thereby resulting in quick calibration of the magnetometer and higher output
         /// data accuracy. The current consumption is slightly higher in comparison to the
         /// NDOF_FMC_OFF fusion mode.
-        const NDOF = 0b1_1100;
+        const NDOF = 0b1100;
     }
 }
 
@@ -1655,10 +1723,7 @@ pub struct BNO055Interrupt(pub u8);
 
 bitflags! {
     /// BNO055 interrupt enable/mask flags.
-    // #[derive(num_derive::FromPrimitive)]
-    // #[cfg_attr(not(feature = "defmt-03"), derive(Debug, Clone, Copy, PartialEq, Eq))]
     impl BNO055Interrupt: u8 {
-    // pub struct BNO055Interrupt: u8 {
         const ACC_NM = 0b10000000;
         const ACC_AM = 0b01000000;
         const ACC_HIGH_G = 0b00100000;
@@ -1670,9 +1735,22 @@ bitflags! {
     }
 }
 
-impl BNO055Interrupt {
-    pub fn has_any(&self) -> bool {
-        self.0 != 0
+/// `SYS_TRIGGER` ([`regs::BNO055_SYS_TRIGGER`]) register values.
+#[derive(num_derive::FromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[repr(transparent)]
+pub struct BNO055SystemTrigger(pub u8);
+
+bitflags! {
+    impl BNO055SystemTrigger: u8 {
+        /// Select External Clock
+        const EXT_CLK_SEL = 0b1000_0000;
+        /// Clear interrupts command
+        const RST_INT = 0b0100_0000;
+        /// Reset command
+        const RST_SYS = 0b0010_0000;
+        /// Self-test command
+        const SELF_TEST = 0b0000_0001;
     }
 }
 
