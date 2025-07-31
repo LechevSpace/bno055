@@ -1473,7 +1473,7 @@ bitflags! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+/// SYS_STATUS 0x39
 pub struct BNO055SystemStatusCode(u8);
 
 bitflags! {
@@ -1492,6 +1492,27 @@ bitflags! {
         const RUNNING = 5;
         /// 6 System running without fusion algorithm
         const RUNNING_WITHOUT_FUSION = 6;
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055SystemStatusCode {
+    fn format(&self, f: defmt::Formatter) {
+        // format the bitfields of the register as struct fields
+        defmt::write!(
+           f,
+           "BNO055SystemStatusCode( {} )",
+           match self.bits() {
+            0 => "SystemIdle (0)",
+            1 => "SystemError (1)",
+            2 => "InitPeripherals (2)",
+            3 => "SystemInit (3)",
+            4 => "Executing (4)",
+            5 => "Running (5)",
+            6 => "RunningWithoutFusion (6)",
+            _ => defmt::unreachable!("Invalid System Status Code (SYS_STATUS)")
+           }
+        )
     }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1596,7 +1617,7 @@ impl BNO055Calibration {
         unsafe {
             core::slice::from_raw_parts(
                 (self as *const _) as *const u8,
-                ::core::mem::size_of::<BNO055Calibration>(),
+                BNO055_CALIB_SIZE,
             )
         }
     }
