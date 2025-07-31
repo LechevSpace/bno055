@@ -18,7 +18,7 @@ license-file = "LICENSE"
 readme = "README.md"
 
 # linux-embedded-hal requires 1.65 because of nix
-rust-version = "1.65"
+rust-version = "1.80"
 
 [dependencies]
 byteorder = { version = "1", default-features = false }
@@ -28,13 +28,19 @@ bitflags = "2"
 num-traits = { version = "0.2.15", default-features = false, features = ["libm"] }
 num-derive = "0.4.1"
 
-defmt = { version = "0.3.10", optional = true }
+defmt = { version = "1", optional = true }
 
 embedded-hal = { version = "1.0" }
+embedded-hal-async = { version = "1.0", optional = true }
+
+maybe-async = "0.2"
 
 [features]
-default = []
+default = ["defmt-03", "async"]
 std = []
+
+async = ["dep:embedded-hal-async"]
+blocking = ["maybe-async/is_sync"]
 
 defmt-03 = ["dep:defmt", "embedded-hal/defmt-03"]
 serde = ["dep:serde", "mint/serde"]

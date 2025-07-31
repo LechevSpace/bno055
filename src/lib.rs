@@ -1,21 +1,30 @@
-#![doc(html_root_url = "https://docs.rs/bno055/0.4.0")]
+#![doc(html_root_url = "https://docs.rs/bno055/0.5.0")] // Version bump
 #![cfg_attr(not(feature = "std"), no_std)]
 #![allow(clippy::bad_bit_mask)]
 
 //! Bosch Sensortec BNO055 9-axis IMU sensor driver.
 //! Datasheet: https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BNO055-DS000.pdf
+
+// Use maybe_async to toggle between blocking and async implementations
+use maybe_async::maybe_async;
+
+// Cfg-gate the HAL traits to select the correct ones based on the "async" feature
+#[cfg(not(feature = "async"))]
 use embedded_hal::{
     delay::DelayNs,
     i2c::{I2c, SevenBitAddress},
 };
 
-use bitflags::bitflags;
-// #[cfg(not(feature = "defmt-03"))]
-// #[cfg(feature = "defmt-03")]
-// use defmt::bitflags;
+#[cfg(feature = "async")]
+use embedded_hal_async::{
+    delay::DelayNs,
+    i2c::{I2c, SevenBitAddress},
+};
 
+use bitflags::bitflags;
 use byteorder::{ByteOrder, LittleEndian};
 pub use mint;
+use num_traits::FromPrimitive;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -72,59 +81,7 @@ pub struct Bno055<I> {
     use_default_addr: bool,
 }
 
-macro_rules! set_u8_from {
-    ($bno055 : expr, $page : expr, $reg : expr, $x : expr) => {{
-        $bno055.set_page($page)?;
-        $bno055.write_u8($reg, $x.into()).map_err(Error::I2c)?;
-        Ok(())
-    }};
-}
-
-macro_rules! set_config_from {
-    ($bno055 : expr, $page : expr, $reg : expr, $x : expr, $delay : expr) => {{
-        let prev = $bno055.mode;
-        $bno055.set_mode(BNO055OperationMode::CONFIG_MODE, $delay)?;
-        let res = set_u8_from!($bno055, $page, $reg, $x);
-        $bno055.set_mode(prev, $delay)?;
-        res
-    }};
-}
-
-macro_rules! read_u8_into {
-    ($bno055 : expr, $page : expr, $reg : expr) => {{
-        $bno055.set_page($page)?;
-        let regval = $bno055.read_u8($reg).map_err(Error::I2c)?;
-        <_ as num_traits::FromPrimitive>::from_u8(regval)
-    }};
-}
-
-macro_rules! write_flags {
-    ($bno055 : expr, $page : expr, $reg : expr, $flags : expr) => {{
-        $bno055.set_page($page)?;
-        $bno055.write_u8($reg, $flags.bits()).map_err(Error::I2c)?;
-        Ok(())
-    }};
-}
-
-macro_rules! write_config_flags {
-    ($bno055 : expr, $page : expr, $reg : expr, $flags : expr, $delay : expr) => {{
-        let prev = $bno055.mode;
-        $bno055.set_mode(BNO055OperationMode::CONFIG_MODE, $delay)?;
-        let res = write_flags!($bno055, $page, $reg, $flags);
-        $bno055.set_mode(prev, $delay)?;
-        res
-    }};
-}
-
-macro_rules! read_flags {
-    ($bno055 : expr, $page : expr, $reg : expr, $flag_type : ty) => {{
-        $bno055.set_page($page)?;
-        let flags = $bno055.read_u8($reg).map_err(Error::I2c)?;
-        let flags = <$flag_type>::from_bits_truncate(flags);
-        Ok(flags)
-    }};
-}
-
+#[maybe_async]
 impl<I, E> Bno055<I>
 where
     I: I2c<SevenBitAddress, Error = E>,
@@ -147,7 +104,6 @@ where
     /// Enables use of alternative I2C address `regs::BNO055_ALTERNATE_ADDR`.
     pub fn with_alternative_address(mut self) -> Self {
         self.use_default_addr = false;
-
         self
     }
 
@@ -158,243 +114,150 @@ where
     /// - Sets BNO055 to `CONFIG` mode
     /// - Sets BNO055's power mode to `NORMAL`
     /// - Clears `SYS_TRIGGER` register
-    ///
-    /// # Usage Example
-    ///
-    /// ```rust
-    /// // use your_chip_hal::{I2c, Delay}; // <- import your chip's I2c and Delay
-    /// use bno055::Bno055;
-    /// #
-    /// # // All of this is needed for example to work:
-    /// # use bno055::BNO055_ID;
-    /// # use embedded_hal::delay::DelayNs;
-    /// # use embedded_hal::i2c::{I2c as I2cTrait, Operation, Error, ErrorType, ErrorKind};
-    /// # struct Delay {}
-    /// # impl Delay { pub fn new() -> Self { Delay{ } }}
-    /// # impl DelayNs for Delay {
-    /// #    fn delay_ns(&mut self, ms: u32) {
-    /// #        // no-op for example purposes
-    /// #    }
-    /// # }
-    /// # struct I2c {}
-    /// # impl I2c { pub fn new() -> Self { I2c { } }}
-    /// # #[derive(Debug)]
-    /// # struct DummyError {}
-    /// # impl Error for DummyError { fn kind(&self) -> ErrorKind { ErrorKind::Other } }
-    /// # impl ErrorType for I2c { type Error = DummyError; }
-    /// # // 3 calls are made, 2 Writes and 1 Write/Read. We want to mock the 3rd call's read.
-    /// # impl I2cTrait for I2c { fn transaction(&mut self, address: u8, operations: &mut [Operation<'_>]) -> Result<(), Self::Error> { match operations.get_mut(1) { Some(Operation::Read(read)) => { read[0] = BNO055_ID; }, _ => {} }; Ok(()) } }
-    /// #
-    /// # // Actual example:
-    /// let mut delay = Delay::new(/* ... */);
-    /// let mut i2c = I2c::new(/* ... */);
-    /// let mut bno055 = Bno055::new(i2c);
-    /// bno055.init(&mut delay)?;
-    /// # Result::<(), bno055::Error<DummyError>>::Ok(())
-    /// ```
-    pub fn init(&mut self, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
+    pub async fn init<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
 
-        let id = self.id()?;
+        let id = self.id().await?;
         if id != regs::BNO055_ID {
             return Err(Error::InvalidChipId(id));
         }
 
-        self.soft_reset(delay)?;
-        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-        self.set_power_mode(BNO055PowerMode::NORMAL)?;
-        self.write_u8(regs::BNO055_SYS_TRIGGER, 0x00)
-            .map_err(Error::I2c)?;
+        self.soft_reset(delay).await?;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+        self.set_power_mode(BNO055PowerMode::NORMAL).await?;
+        self.write_u8(regs::BNO055_SYS_TRIGGER, 0x00).await?;
 
         Ok(())
     }
 
     /// Resets the BNO055, initializing the register map to default values.
     /// More in section 3.2.
-    pub fn soft_reset(&mut self, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+    pub async fn soft_reset<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         self.write_u8(
             regs::BNO055_SYS_TRIGGER,
             BNO055SystemTrigger::RST_SYS.bits(),
         )
-        .map_err(Error::I2c)?;
+        .await?;
 
         // As per table 1.2
-        delay.delay_ms(650);
+        delay.delay_ms(650).await;
         Ok(())
     }
 
     /// Run Self-test on the BNO055
     ///
     /// See section 3.9.2 Built-In Self-Test (BIST)
-    ///
-    /// To know if the BIST succeeded/failed you should:
-    /// 1. Trigger BIST
-    /// 2. Wait for 400ms
-    /// 3. Read `SYS_ERROR` register (`0x3A`):
-    /// - `SYS_ERROR` will remain at 0 in case of success (0 = No error)
-    /// - `SYS_ERROR` will show 3 in case of self-test failure (3 = Self-test result failed)
-    /// 4. In case of failed BIST (`SYS_ERROR`` != 0 above), you can see which sensor
-    /// failed by reading the `ST_RESULT` (`0x36`) register (bit of the corresponding
-    /// sensor is ‘1’ if self-test was successful, but will show ‘0’ if the self-test failed).
-    ///
-    /// | Components      | Test type          |
-    /// | --------------- | ------------------ |
-    /// | Accelerometer   | built in self-test |
-    /// | Magnetometer    | built in self-test |
-    /// | Gyroscope       | built in self-test |
-    /// | Microcontroller | No test performed  |
-    pub fn self_test(&mut self, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+    pub async fn self_test<D: DelayNs>(&mut self, delay: &mut D) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let prev = self.mode;
-
-        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         self.write_u8(
             regs::BNO055_SYS_TRIGGER,
-            BNO055SystemTrigger::RST_SYS.bits(),
+            BNO055SystemTrigger::SELF_TEST.bits(),
         )
-        .map_err(Error::I2c)?;
-
-        self.set_mode(prev, delay)?;
-
+        .await?;
+        self.set_mode(prev, delay).await?;
         Ok(())
     }
+
     /// Sets the operating mode, see [BNO055OperationMode].
     /// See section 3.3.
-    pub fn set_mode(
+    pub async fn set_mode<D: DelayNs>(
         &mut self,
         mode: BNO055OperationMode,
-        delay: &mut dyn DelayNs,
+        delay: &mut D,
     ) -> Result<(), Error<E>> {
         if self.mode != mode {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+            self.set_page(BNO055RegisterPage::PAGE_0).await?;
             self.mode = mode;
-
-            self.write_u8(regs::BNO055_OPR_MODE, mode.bits())
-                .map_err(Error::I2c)?;
-
+            self.write_u8(regs::BNO055_OPR_MODE, mode.bits()).await?;
             // Table 3-6 says 19ms to switch to CONFIG_MODE
-            delay.delay_ms(19);
+            delay.delay_ms(19).await;
         }
-
         Ok(())
     }
 
     /// Sets the power mode, see [BNO055PowerMode](enum.BNO055PowerMode.html)
     /// See section 3.2
-    pub fn set_power_mode(&mut self, mode: BNO055PowerMode) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        self.write_u8(regs::BNO055_PWR_MODE, mode.bits())
-            .map_err(Error::I2c)?;
-
+    pub async fn set_power_mode(&mut self, mode: BNO055PowerMode) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.write_u8(regs::BNO055_PWR_MODE, mode.bits()).await?;
         Ok(())
     }
 
     /// Returns BNO055's power mode.
-    pub fn power_mode(&mut self) -> Result<BNO055PowerMode, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        let mode = self.read_u8(regs::BNO055_PWR_MODE).map_err(Error::I2c)?;
-
+    pub async fn power_mode(&mut self) -> Result<BNO055PowerMode, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mode = self.read_u8(regs::BNO055_PWR_MODE).await?;
         Ok(BNO055PowerMode::from_bits_truncate(mode))
     }
 
     /// Enables/Disables usage of external 32k crystal.
-    ///
-    /// > It takes minimum ~600ms to configure the external crystal and startup the BNO055
-    ///
-    /// See section 5.5.1 External 32kHz Crystal Oscillator
-    pub fn set_external_crystal(
+    pub async fn set_external_crystal<D: DelayNs>(
         &mut self,
         ext: bool,
-        delay: &mut dyn DelayNs,
+        delay: &mut D,
     ) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let prev = self.mode;
-        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-        self.write_u8(
-            regs::BNO055_SYS_TRIGGER,
-            if ext {
-                BNO055SystemTrigger::EXT_CLK_SEL.bits()
-            } else {
-                0x00
-            },
-        )
-        .map_err(Error::I2c)?;
-
-        self.set_mode(prev, delay)?;
-
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+        let value = if ext {
+            BNO055SystemTrigger::EXT_CLK_SEL.bits()
+        } else {
+            0x00
+        };
+        self.write_u8(regs::BNO055_SYS_TRIGGER, value).await?;
+        self.set_mode(prev, delay).await?;
         Ok(())
     }
 
     /// Configures axis remap of the device.
-    pub fn set_axis_remap(&mut self, remap: AxisRemap) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+    pub async fn set_axis_remap(&mut self, remap: AxisRemap) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let remap_value = (remap.x.bits() & 0b11)
             | ((remap.y.bits() & 0b11) << 2)
             | ((remap.z.bits() & 0b11) << 4);
-
         self.write_u8(regs::BNO055_AXIS_MAP_CONFIG, remap_value)
-            .map_err(Error::I2c)?;
-
+            .await?;
         Ok(())
     }
 
     /// Returns axis remap of the device.
-    pub fn axis_remap(&mut self) -> Result<AxisRemap, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        let value = self
-            .read_u8(regs::BNO055_AXIS_MAP_CONFIG)
-            .map_err(Error::I2c)?;
-
+    pub async fn axis_remap(&mut self) -> Result<AxisRemap, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let value = self.read_u8(regs::BNO055_AXIS_MAP_CONFIG).await?;
         let remap = AxisRemap {
             x: BNO055AxisConfig::from_bits_truncate(value & 0b11),
             y: BNO055AxisConfig::from_bits_truncate((value >> 2) & 0b11),
             z: BNO055AxisConfig::from_bits_truncate((value >> 4) & 0b11),
         };
-
         Ok(remap)
     }
 
     /// Configures device's axes sign: positive or negative.
-    pub fn set_axis_sign(&mut self, sign: BNO055AxisSign) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+    pub async fn set_axis_sign(&mut self, sign: BNO055AxisSign) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         self.write_u8(regs::BNO055_AXIS_MAP_SIGN, sign.bits())
-            .map_err(Error::I2c)?;
-
+            .await?;
         Ok(())
     }
 
     /// Return device's axes sign.
-    pub fn axis_sign(&mut self) -> Result<BNO055AxisSign, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        let value = self
-            .read_u8(regs::BNO055_AXIS_MAP_SIGN)
-            .map_err(Error::I2c)?;
-
+    pub async fn axis_sign(&mut self) -> Result<BNO055AxisSign, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let value = self.read_u8(regs::BNO055_AXIS_MAP_SIGN).await?;
         Ok(BNO055AxisSign::from_bits_truncate(value))
     }
 
-    /// Gets the revision of software, bootloader, accelerometer, magnetometer, and gyroscope of
-    /// the BNO055 device.
-    pub fn get_revision(&mut self) -> Result<BNO055Revision, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+    /// Gets the revision of software, bootloader, accelerometer, magnetometer, and gyroscope.
+    pub async fn get_revision(&mut self) -> Result<BNO055Revision, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let mut buf: [u8; 6] = [0; 6];
-
-        self.read_bytes(regs::BNO055_ACC_ID, &mut buf)
-            .map_err(Error::I2c)?;
-
+        self.read_bytes(regs::BNO055_ACC_ID, &mut buf).await?;
         Ok(BNO055Revision {
             software: LittleEndian::read_u16(&buf[3..5]),
             bootloader: buf[5],
@@ -405,38 +268,30 @@ where
     }
 
     /// Returns device's system status.
-    pub fn get_system_status(
+    pub async fn get_system_status<D: DelayNs>(
         &mut self,
         do_selftest: bool,
-        delay: &mut dyn DelayNs,
+        delay: &mut D,
     ) -> Result<BNO055SystemStatus, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
 
         let selftest = if do_selftest {
             let prev = self.mode;
-            self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-
-            let sys_trigger = self.read_u8(regs::BNO055_SYS_TRIGGER).map_err(Error::I2c)?;
-
+            self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+                .await?;
+            let sys_trigger = self.read_u8(regs::BNO055_SYS_TRIGGER).await?;
             self.write_u8(regs::BNO055_SYS_TRIGGER, sys_trigger | 0x1)
-                .map_err(Error::I2c)?;
-
-            // Wait for self-test result
-            for _ in 0..4 {
-                delay.delay_ms(255);
-            }
-
-            let result = self.read_u8(regs::BNO055_ST_RESULT).map_err(Error::I2c)?;
-
-            self.set_mode(prev, delay)?; // Restore previous mode
-
+                .await?;
+            delay.delay_ms(1000).await; // Wait for self-test result
+            let result = self.read_u8(regs::BNO055_ST_RESULT).await?;
+            self.set_mode(prev, delay).await?; // Restore previous mode
             Some(BNO055SelfTestStatus::from_bits_truncate(result))
         } else {
             None
         };
 
-        let status = self.read_u8(regs::BNO055_SYS_STATUS).map_err(Error::I2c)?;
-        let error = self.read_u8(regs::BNO055_SYS_ERR).map_err(Error::I2c)?;
+        let status = self.read_u8(regs::BNO055_SYS_STATUS).await?;
+        let error = self.read_u8(regs::BNO055_SYS_ERR).await?;
 
         Ok(BNO055SystemStatus {
             status: BNO055SystemStatusCode::from_bits_truncate(status),
@@ -446,201 +301,696 @@ where
     }
 
     /// Gets a quaternion (`mint::Quaternion<f32>`) reading from the BNO055.
-    /// Available only in sensor fusion modes.
-    pub fn quaternion(&mut self) -> Result<mint::Quaternion<f32>, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        // Device should be in fusion mode to be able to produce quaternions
-        if self.mode.is_fusion_enabled() {
-            let mut buf: [u8; 8] = [0; 8];
-            self.read_bytes(regs::BNO055_QUA_DATA_W_LSB, &mut buf)
-                .map_err(Error::I2c)?;
-
-            let w = LittleEndian::read_i16(&buf[0..2]);
-            let x = LittleEndian::read_i16(&buf[2..4]);
-            let y = LittleEndian::read_i16(&buf[4..6]);
-            let z = LittleEndian::read_i16(&buf[6..8]);
-
-            let scale = 1.0 / ((1 << 14) as f32);
-
-            let x = x as f32 * scale;
-            let y = y as f32 * scale;
-            let z = z as f32 * scale;
-            let w = w as f32 * scale;
-
-            let quat = mint::Quaternion {
-                v: mint::Vector3 { x, y, z },
-                s: w,
-            };
-
-            Ok(quat)
-        } else {
-            Err(Error::InvalidMode)
+    pub async fn quaternion(&mut self) -> Result<mint::Quaternion<f32>, Error<E>> {
+        if !self.mode.is_fusion_enabled() {
+            return Err(Error::InvalidMode);
         }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mut buf: [u8; 8] = [0; 8];
+        self.read_bytes(regs::BNO055_QUA_DATA_W_LSB, &mut buf)
+            .await?;
+        let w = LittleEndian::read_i16(&buf[0..2]);
+        let x = LittleEndian::read_i16(&buf[2..4]);
+        let y = LittleEndian::read_i16(&buf[4..6]);
+        let z = LittleEndian::read_i16(&buf[6..8]);
+        let scale = 1.0 / ((1 << 14) as f32);
+        Ok(mint::Quaternion {
+            v: mint::Vector3 {
+                x: x as f32 * scale,
+                y: y as f32 * scale,
+                z: z as f32 * scale,
+            },
+            s: w as f32 * scale,
+        })
     }
 
     /// Get Euler angles representation of heading in degrees.
-    /// Euler angles is represented as (`roll`, `pitch`, `yaw/heading`).
-    /// Available only in sensor fusion modes.
-    pub fn euler_angles(&mut self) -> Result<mint::EulerAngles<f32, ()>, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        // Device should be in fusion mode to be able to produce Euler angles
-        if self.mode.is_fusion_enabled() {
-            let mut buf: [u8; 6] = [0; 6];
-
-            self.read_bytes(regs::BNO055_EUL_HEADING_LSB, &mut buf)
-                .map_err(Error::I2c)?;
-
-            let heading = LittleEndian::read_i16(&buf[0..2]) as f32;
-            let roll = LittleEndian::read_i16(&buf[2..4]) as f32;
-            let pitch = LittleEndian::read_i16(&buf[4..6]) as f32;
-
-            let scale = 1f32 / 16f32; // 1 degree = 16 LSB
-
-            let rot = mint::EulerAngles::from([roll * scale, pitch * scale, heading * scale]);
-
-            Ok(rot)
-        } else {
-            Err(Error::InvalidMode)
+    pub async fn euler_angles(&mut self) -> Result<mint::EulerAngles<f32, ()>, Error<E>> {
+        if !self.mode.is_fusion_enabled() {
+            return Err(Error::InvalidMode);
         }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mut buf: [u8; 6] = [0; 6];
+        self.read_bytes(regs::BNO055_EUL_HEADING_LSB, &mut buf)
+            .await?;
+        let heading = LittleEndian::read_i16(&buf[0..2]) as f32;
+        let roll = LittleEndian::read_i16(&buf[2..4]) as f32;
+        let pitch = LittleEndian::read_i16(&buf[4..6]) as f32;
+        let scale = 1f32 / 16f32;
+        Ok(mint::EulerAngles::from([
+            roll * scale,
+            pitch * scale,
+            heading * scale,
+        ]))
     }
 
     /// Get calibration status
-    pub fn get_calibration_status(&mut self) -> Result<BNO055CalibrationStatus, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        let status = self.read_u8(regs::BNO055_CALIB_STAT).map_err(Error::I2c)?;
-
-        let sys = (status >> 6) & 0b11;
-        let gyr = (status >> 4) & 0b11;
-        let acc = (status >> 2) & 0b11;
-        let mag = status & 0b11;
-
-        Ok(BNO055CalibrationStatus { sys, gyr, acc, mag })
+    pub async fn get_calibration_status(&mut self) -> Result<BNO055CalibrationStatus, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let status = self.read_u8(regs::BNO055_CALIB_STAT).await?;
+        Ok(BNO055CalibrationStatus {
+            sys: (status >> 6) & 0b11,
+            gyr: (status >> 4) & 0b11,
+            acc: (status >> 2) & 0b11,
+            mag: status & 0b11,
+        })
     }
 
     /// Checks whether device is fully calibrated or not.
-    pub fn is_fully_calibrated(&mut self) -> Result<bool, Error<E>> {
-        let status = self.get_calibration_status()?;
+    pub async fn is_fully_calibrated(&mut self) -> Result<bool, Error<E>> {
+        let status = self.get_calibration_status().await?;
         Ok(status.mag == 3 && status.gyr == 3 && status.acc == 3 && status.sys == 3)
     }
 
     /// Reads current calibration profile of the device.
-    pub fn calibration_profile(
+    pub async fn calibration_profile<D: DelayNs>(
         &mut self,
-        delay: &mut dyn DelayNs,
+        delay: &mut D,
     ) -> Result<BNO055Calibration, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let prev_mode = self.mode;
-        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         let mut buf: [u8; BNO055_CALIB_SIZE] = [0; BNO055_CALIB_SIZE];
-
         self.read_bytes(regs::BNO055_ACC_OFFSET_X_LSB, &mut buf[..])
-            .map_err(Error::I2c)?;
-
+            .await?;
         let res = BNO055Calibration::from_buf(&buf);
-
-        self.set_mode(prev_mode, delay)?;
-
+        self.set_mode(prev_mode, delay).await?;
         Ok(res)
     }
 
     /// Sets current calibration profile.
-    pub fn set_calibration_profile(
+    pub async fn set_calibration_profile<D: DelayNs>(
         &mut self,
         calib: BNO055Calibration,
-        delay: &mut dyn DelayNs,
+        delay: &mut D,
     ) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
         let prev_mode = self.mode;
-        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)?;
-
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         let buf_profile = calib.as_bytes();
-
-        // Combine register address and profile into single buffer
-        let buf_reg = [regs::BNO055_ACC_OFFSET_X_LSB; 1];
-        let mut buf_with_reg = [0u8; 1 + BNO055_CALIB_SIZE];
-        for (to, from) in buf_with_reg
-            .iter_mut()
-            .zip(buf_reg.iter().chain(buf_profile.iter()))
-        {
-            *to = *from
-        }
-
-        self.i2c
-            .write(self.i2c_addr(), &buf_with_reg[..])
-            .map_err(Error::I2c)?;
-
-        // change operation mode to fusion mode
-        self.set_mode(prev_mode, delay)?;
-
+        self.write_bytes(regs::BNO055_ACC_OFFSET_X_LSB, buf_profile)
+            .await?;
+        self.set_mode(prev_mode, delay).await?;
         Ok(())
     }
 
     /// Returns device's factory-programmed and constant chip ID.
-    /// This ID is device model ID and not a BNO055's unique ID, whic is stored in different register.
-    pub fn id(&mut self) -> Result<u8, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-        self.read_u8(regs::BNO055_CHIP_ID).map_err(Error::I2c)
+    pub async fn id(&mut self) -> Result<u8, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_u8(regs::BNO055_CHIP_ID).await
     }
 
     /// Returns device's operation mode.
-    pub fn get_mode(&mut self) -> Result<BNO055OperationMode, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        let mode = self.read_u8(regs::BNO055_OPR_MODE).map_err(Error::I2c)?;
+    pub async fn get_mode(&mut self) -> Result<BNO055OperationMode, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mode = self.read_u8(regs::BNO055_OPR_MODE).await?;
         let mode = BNO055OperationMode::from_bits_truncate(mode);
         self.mode = mode;
-
         Ok(mode)
     }
 
-    /// Checks whether the device is in Sensor Fusion mode or not.
-    pub fn is_in_fusion_mode(&mut self) -> Result<bool, Error<E>> {
-        Ok(self.mode.is_fusion_enabled())
+    /// Checks whether the device is in Sensor Fusion mode or not by reading from the device.
+    pub async fn is_in_fusion_mode(&mut self) -> Result<bool, Error<E>> {
+        let mode = self.get_mode().await?;
+        Ok(mode.is_fusion_enabled())
     }
 
-    pub fn get_acc_config(&mut self) -> Result<AccConfig, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_1)?;
-
-        let bits = self.read_u8(regs::BNO055_ACC_CONFIG).map_err(Error::I2c)?;
-
-        let acc_config = AccConfig::try_from_bits(bits).map_err(Error::AccConfig)?;
-
-        Ok(acc_config)
+    /// Returns the current accelerometer config
+    pub async fn get_acc_config(&mut self) -> Result<AccConfig, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let bits = self.read_u8(regs::BNO055_ACC_CONFIG).await?;
+        AccConfig::try_from_bits(bits).map_err(Error::AccConfig)
     }
 
-    pub fn set_acc_config(&mut self, acc_config: &AccConfig) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_1)?;
-
+    /// Sets the accelerometer config
+    pub async fn set_acc_config(&mut self, acc_config: &AccConfig) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
         self.write_u8(regs::BNO055_ACC_CONFIG, acc_config.bits())
-            .map_err(Error::I2c)?;
-
+            .await?;
         Ok(())
+    }
+
+    /// Returns linear acceleration vector in cm/s^2 units.
+    pub async fn linear_acceleration_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
+        if !self.mode.is_fusion_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_vec_raw(regs::BNO055_LIA_DATA_X_LSB).await
+    }
+
+    /// Returns linear acceleration vector in m/s^2 units.
+    pub async fn linear_acceleration(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
+        let lia = self.linear_acceleration_fixed().await?;
+        Ok(Self::scale_vec(lia, ACCEL_SCALING))
+    }
+
+    /// Returns gravity vector in cm/s^2 units.
+    pub async fn gravity_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
+        if !self.mode.is_fusion_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_vec_raw(regs::BNO055_GRV_DATA_X_LSB).await
+    }
+
+    /// Returns gravity vector in m/s^2 units.
+    pub async fn gravity(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
+        let grv = self.gravity_fixed().await?;
+        Ok(Self::scale_vec(grv, ACCEL_SCALING))
+    }
+
+    /// Returns Acceleration and Gyroscope vectors in this order.
+    pub async fn dof6_fixed(
+        &mut self,
+    ) -> Result<(mint::Vector3<i16>, mint::Vector3<i16>), Error<E>> {
+        if !self.mode.is_accel_enabled() || !self.mode.is_gyro_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mut buf: [u8; 12] = [0; 12];
+        self.read_bytes(regs::BNO055_ACC_DATA_X_LSB, &mut buf)
+            .await?;
+        let accel = mint::Vector3::from([
+            LittleEndian::read_i16(&buf[0..2]),
+            LittleEndian::read_i16(&buf[2..4]),
+            LittleEndian::read_i16(&buf[4..6]),
+        ]);
+        let gyro = mint::Vector3::from([
+            LittleEndian::read_i16(&buf[6..8]),
+            LittleEndian::read_i16(&buf[8..10]),
+            LittleEndian::read_i16(&buf[10..12]),
+        ]);
+        Ok((accel, gyro))
+    }
+
+    /// Returns Acceleration and Gyroscope vectors in this order.
+    pub async fn dof6(&mut self) -> Result<(mint::Vector3<f32>, mint::Vector3<f32>), Error<E>> {
+        let (accel, gyro) = self.dof6_fixed().await?;
+        Ok((
+            Self::scale_vec(accel, ACCEL_SCALING),
+            Self::scale_vec(gyro, GYRO_SCALING),
+        ))
+    }
+
+    /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
+    pub async fn dof9_fixed(
+        &mut self,
+    ) -> Result<(mint::Vector3<i16>, mint::Vector3<i16>, mint::Vector3<i16>), Error<E>> {
+        if !self.mode.is_accel_enabled()
+            || !self.mode.is_gyro_enabled()
+            || !self.mode.is_mag_enabled()
+        {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let mut buf: [u8; 18] = [0; 18];
+        self.read_bytes(regs::BNO055_ACC_DATA_X_LSB, &mut buf)
+            .await?;
+        let accel = mint::Vector3::from([
+            LittleEndian::read_i16(&buf[0..2]),
+            LittleEndian::read_i16(&buf[2..4]),
+            LittleEndian::read_i16(&buf[4..6]),
+        ]);
+        let mag = mint::Vector3::from([
+            LittleEndian::read_i16(&buf[6..8]),
+            LittleEndian::read_i16(&buf[8..10]),
+            LittleEndian::read_i16(&buf[10..12]),
+        ]);
+        let gyro = mint::Vector3::from([
+            LittleEndian::read_i16(&buf[12..14]),
+            LittleEndian::read_i16(&buf[14..16]),
+            LittleEndian::read_i16(&buf[16..18]),
+        ]);
+        Ok((accel, mag, gyro))
+    }
+
+    /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
+    pub async fn dof9(
+        &mut self,
+    ) -> Result<(mint::Vector3<f32>, mint::Vector3<f32>, mint::Vector3<f32>), Error<E>> {
+        let (accel, mag, gyro) = self.dof9_fixed().await?;
+        Ok((
+            Self::scale_vec(accel, ACCEL_SCALING),
+            Self::scale_vec(mag, MAG_SCALING),
+            Self::scale_vec(gyro, GYRO_SCALING),
+        ))
+    }
+
+    /// Returns current accelerometer data in cm/s^2 units.
+    pub async fn accel_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
+        if !self.mode.is_accel_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_vec_raw(regs::BNO055_ACC_DATA_X_LSB).await
+    }
+
+    /// Returns current accelerometer data in m/s^2 units.
+    pub async fn accel_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
+        let a = self.accel_data_fixed().await?;
+        Ok(Self::scale_vec(a, ACCEL_SCALING))
+    }
+
+    /// Returns current gyroscope data in 1/16th deg/s units.
+    pub async fn gyro_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
+        if !self.mode.is_gyro_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_vec_raw(regs::BNO055_GYR_DATA_X_LSB).await
+    }
+
+    /// Returns current gyroscope data in deg/s units.
+    pub async fn gyro_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
+        let g = self.gyro_data_fixed().await?;
+        Ok(Self::scale_vec(g, GYRO_SCALING))
+    }
+
+    /// Returns current magnetometer data in 1/16th uT units.
+    pub async fn mag_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
+        if !self.mode.is_mag_enabled() {
+            return Err(Error::InvalidMode);
+        }
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.read_vec_raw(regs::BNO055_MAG_DATA_X_LSB).await
+    }
+
+    /// Returns current magnetometer data in uT units.
+    pub async fn mag_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
+        let m = self.mag_data_fixed().await?;
+        Ok(Self::scale_vec(m, MAG_SCALING))
+    }
+
+    /// Returns current temperature of the chip (in degrees Celsius).
+    pub async fn temperature(&mut self) -> Result<i8, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let temp = self.read_u8(regs::BNO055_TEMP).await? as i8;
+        Ok(temp)
+    }
+
+    /// Read which interrupts are currently triggered/active
+    pub async fn interrupts_triggered(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        self.read_flags(BNO055RegisterPage::PAGE_0, regs::BNO055_INT_STA)
+            .await
+    }
+
+    /// Resets the interrupts register and the INT pin
+    pub async fn clear_interrupts(&mut self) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        self.write_u8(
+            regs::BNO055_SYS_TRIGGER,
+            BNO055SystemTrigger::RST_INT.bits(),
+        )
+        .await
+    }
+
+    /// Sets which interrupts are enabled
+    pub async fn set_interrupts_enabled(
+        &mut self,
+        interrupts: BNO055Interrupt,
+    ) -> Result<(), Error<E>> {
+        self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN, interrupts)
+            .await
+    }
+
+    /// Returns currently enabled interrupts
+    pub async fn interrupts_enabled(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN)
+            .await
+    }
+
+    /// Sets interrupts mask
+    pub async fn set_interrupts_mask(&mut self, mask: BNO055Interrupt) -> Result<(), Error<E>> {
+        self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK, mask)
+            .await
+    }
+
+    /// Returns the current interrupts mask
+    pub async fn interrupts_mask(&mut self) -> Result<BNO055Interrupt, Error<E>> {
+        self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK)
+            .await
+    }
+
+    /// Sets accelerometer interrupt settings
+    pub async fn set_acc_interrupt_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055AccIntSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_INT_SETTING,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer interrupt settings
+    pub async fn acc_interrupt_settings(&mut self) -> Result<BNO055AccIntSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_INT_SETTING)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccIntSettings))
+    }
+
+    /// Sets accelerometer any motion interrupt threshold setting
+    pub async fn set_acc_am_threshold<D: DelayNs>(
+        &mut self,
+        mult: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_AM_THRES,
+            mult,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer any motion interrupt threshold setting
+    pub async fn acc_am_threshold(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_AM_THRES)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccAmThreshold))
+    }
+
+    /// Sets accelerometer High-G interrupt duration setting
+    pub async fn set_acc_hg_duration<D: DelayNs>(
+        &mut self,
+        dur: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_HG_DURATION,
+            dur,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer High-G interrupt duration setting
+    pub async fn acc_hg_duration(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_HG_DURATION)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccHgDuration))
+    }
+
+    /// Sets accelerometer High-G interrupt threshold setting
+    pub async fn set_acc_hg_threshold<D: DelayNs>(
+        &mut self,
+        mult: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_HG_THRES,
+            mult,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer High-G interrupt threshold setting
+    pub async fn acc_hg_threshold(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_HG_THRES)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccHgThreshold))
+    }
+
+    /// Sets accelerometer no/slow-motion interrupt threshold setting
+    pub async fn set_acc_nm_threshold<D: DelayNs>(
+        &mut self,
+        mult: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_NM_THRES,
+            mult,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer no/slow-motion interrupt threshold setting
+    pub async fn acc_nm_threshold(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_THRES)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccNmThreshold))
+    }
+
+    /// Sets accelerometer no/slow-motion interrupt settings
+    pub async fn set_acc_nm_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055AccNmSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_ACC_NM_SET,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current accelerometer no/slow-motion interrupt settings
+    pub async fn acc_nm_settings(&mut self) -> Result<BNO055AccNmSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_SET)
+            .await?
+            .ok_or(Error::AccConfig(acc_config::Error::BadAccNmSettings))
+    }
+
+    /// Sets gyroscope interrupt settings
+    pub async fn set_gyr_interrupt_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055GyrIntSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.write_config_flags(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_INT_SETTING,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns the current gyroscope interrupt settings
+    pub async fn gyr_interrupt_settings(&mut self) -> Result<BNO055GyrIntSettings, Error<E>> {
+        self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_INT_SETTING)
+            .await
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for x-axis
+    pub async fn set_gyr_hr_x_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_X_SET,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for x-axis
+    pub async fn gyr_hr_x_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_X_SET)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrHrSettings))
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for x-axis
+    pub async fn set_gyr_dur_x<D: DelayNs>(
+        &mut self,
+        duration: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_X,
+            duration,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for x-axis
+    pub async fn gyr_dur_x(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_X)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrDurX))
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for y-axis
+    pub async fn set_gyr_hr_y_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_Y_SET,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for y-axis
+    pub async fn gyr_hr_y_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Y_SET)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrHrYSettings))
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for y-axis
+    pub async fn set_gyr_dur_y<D: DelayNs>(
+        &mut self,
+        duration: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_Y,
+            duration,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for y-axis
+    pub async fn gyr_dur_y(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Y)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrDurY))
+    }
+
+    /// Sets gyroscope high-rate interrupt settings for z-axis
+    pub async fn set_gyr_hr_z_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055GyrHrSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_HR_Z_SET,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    pub async fn gyr_hr_z_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Z_SET)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrHrZSettings))
+    }
+
+    /// Sets gyroscope high-rate interrupt duration for z-axis
+    pub async fn set_gyr_dur_z<D: DelayNs>(
+        &mut self,
+        duration: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_DUR_Z,
+            duration,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    pub async fn gyr_dur_z(&mut self) -> Result<u8, Error<E>> {
+        self.read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Z)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrDurZ))
+    }
+
+    /// Sets gyroscope any-motion interrupt threshold
+    pub async fn set_gyr_am_threshold<D: DelayNs>(
+        &mut self,
+        mult: u8,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        let mult = mult & BIT_7_RESERVED_MASK; // Ensure reserved bit is 0
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_AM_THRES,
+            mult,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope high-rate interrupt settings for z-axis
+    pub async fn gyr_am_threshold(&mut self) -> Result<u8, Error<E>> {
+        let mult = self
+            .read_u8_into::<u8>(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_AM_THRES)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrAmThreshold))?;
+        Ok(mult & BIT_7_RESERVED_MASK)
+    }
+
+    /// Sets gyroscope any-motion interrupt settings
+    pub async fn set_gyr_am_settings<D: DelayNs>(
+        &mut self,
+        settings: BNO055GyrAmSettings,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        self.set_config_from(
+            BNO055RegisterPage::PAGE_1,
+            regs::BNO055_GYR_AM_SET,
+            settings,
+            delay,
+        )
+        .await
+    }
+
+    /// Returns current gyroscope any-motion interrupt settings
+    pub async fn gyr_am_settings(&mut self) -> Result<BNO055GyrAmSettings, Error<E>> {
+        self.read_u8_into(BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_AM_SET)
+            .await?
+            .ok_or(Error::GyroConfig(gyr_config::Error::BadGyrAmSettings))
+    }
+
+    // ------------------
+    // Private helper functions
+    // ------------------
+
+    #[inline(always)]
+    fn i2c_addr(&self) -> u8 {
+        if self.use_default_addr {
+            regs::BNO055_DEFAULT_ADDR
+        } else {
+            regs::BNO055_ALTERNATE_ADDR
+        }
     }
 
     /// Sets current register map page.
-    fn set_page(&mut self, page: BNO055RegisterPage) -> Result<(), Error<E>> {
-        self.write_u8(regs::BNO055_PAGE_ID, page.bits())
-            .map_err(Error::I2c)?;
-
-        Ok(())
+    async fn set_page(&mut self, page: BNO055RegisterPage) -> Result<(), Error<E>> {
+        self.write_u8(regs::BNO055_PAGE_ID, page.bits()).await
     }
 
     /// Reads a vector of sensor data from the device.
-    fn read_vec_raw(&mut self, reg: u8) -> Result<mint::Vector3<i16>, Error<E>> {
+    async fn read_vec_raw(&mut self, reg: u8) -> Result<mint::Vector3<i16>, Error<E>> {
         let mut buf: [u8; 6] = [0; 6];
-
-        self.read_bytes(reg, &mut buf).map_err(Error::I2c)?;
-
+        self.read_bytes(reg, &mut buf).await?;
         let x = LittleEndian::read_i16(&buf[0..2]);
         let y = LittleEndian::read_i16(&buf[2..4]);
         let z = LittleEndian::read_i16(&buf[4..6]);
-
         Ok(mint::Vector3::from([x, y, z]))
     }
 
@@ -653,704 +1003,145 @@ where
         ])
     }
 
-    /// Returns linear acceleration vector in cm/s^2 units.
-    /// Available only in sensor fusion modes.
-    pub fn linear_acceleration_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
-        if self.mode.is_fusion_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-            self.read_vec_raw(regs::BNO055_LIA_DATA_X_LSB)
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns linear acceleration vector in m/s^2 units.
-    /// Available only in sensor fusion modes.
-    pub fn linear_acceleration(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
-        let linear_acceleration = self.linear_acceleration_fixed()?;
-        let scaling = 1f32 / 100f32; // 1 m/s^2 = 100 lsb
-        Ok(Self::scale_vec(linear_acceleration, scaling))
-    }
-
-    /// Returns gravity vector in cm/s^2 units.
-    /// Available only in sensor fusion modes.
-    pub fn gravity_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
-        if self.mode.is_fusion_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-            self.read_vec_raw(regs::BNO055_GRV_DATA_X_LSB)
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns gravity vector in m/s^2 units.
-    /// Available only in sensor fusion modes.
-    pub fn gravity(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
-        let gravity = self.gravity_fixed()?;
-        let scaling = 1f32 / 100f32; // 1 m/s^2 = 100 lsb
-        Ok(Self::scale_vec(gravity, scaling))
-    }
-
-    /// Returns Acceleration and Gyroscope vectors in this order.
-    ///
-    /// Available only in modes in which accelerometer and gyroscope are enabled.
-    pub fn dof6_fixed(&mut self) -> Result<(mint::Vector3<i16>, mint::Vector3<i16>), Error<E>> {
-        if self.mode.is_accel_enabled() && self.mode.is_gyro_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-            // start the read from ACC_DATA_X (0x08) registry to GYR_DATA_Z_MSB 0x19
-            // from 8th to 13th incl. reg = 12 bytes
-            let reg = regs::BNO055_ACC_DATA_X_LSB;
-
-            let mut buf: [u8; 12] = [0; 12];
-
-            self.read_bytes(reg, &mut buf).map_err(Error::I2c)?;
-
-            let accel = {
-                let x = LittleEndian::read_i16(&buf[0..2]);
-                let y = LittleEndian::read_i16(&buf[2..4]);
-                let z = LittleEndian::read_i16(&buf[4..6]);
-
-                mint::Vector3::from([x, y, z])
-            };
-            let gyro = {
-                let x = LittleEndian::read_i16(&buf[6..8]);
-                let y = LittleEndian::read_i16(&buf[8..10]);
-                let z = LittleEndian::read_i16(&buf[10..12]);
-
-                mint::Vector3::from([x, y, z])
-            };
-
-            Ok((accel, gyro))
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns Acceleration and Gyroscope vectors in this order.
-    ///
-    /// Available only in modes in which accelerometer and gyroscope are enabled.
-    pub fn dof6(&mut self) -> Result<(mint::Vector3<f32>, mint::Vector3<f32>), Error<E>> {
-        let (accel, gyro) = self.dof6_fixed()?;
-
-        Ok((
-            Self::scale_vec(accel, ACCEL_SCALING),
-            Self::scale_vec(gyro, GYRO_SCALING),
-        ))
-    }
-
-    /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
-    ///
-    /// Available only in modes in which accelerometer, gyroscope and magnetometer are enabled.
-    pub fn dof9_fixed(
+    /// Helper to set a value from a type that can be converted to u8
+    async fn set_u8_from<T: Into<u8> + Send>(
         &mut self,
-    ) -> Result<(mint::Vector3<i16>, mint::Vector3<i16>, mint::Vector3<i16>), Error<E>> {
-        if self.mode.is_accel_enabled() && self.mode.is_gyro_enabled() && self.mode.is_mag_enabled()
-        {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-            // start the read from ACC_DATA_X (0x08) registry to GYR_DATA_Z_MSB 0x19
-            // from 8th to 25th incl. reg = 18 bytes
-            // self.read_vec_raw(regs::BNO055_ACC_DATA_X_LSB)
-            let reg = regs::BNO055_ACC_DATA_X_LSB;
-
-            let mut buf: [u8; 18] = [0; 18];
-
-            self.read_bytes(reg, &mut buf).map_err(Error::I2c)?;
-
-            let accel = {
-                let x = LittleEndian::read_i16(&buf[0..2]);
-                let y = LittleEndian::read_i16(&buf[2..4]);
-                let z = LittleEndian::read_i16(&buf[4..6]);
-
-                mint::Vector3::from([x, y, z])
-            };
-            let gyro = {
-                let x = LittleEndian::read_i16(&buf[6..8]);
-                let y = LittleEndian::read_i16(&buf[8..10]);
-                let z = LittleEndian::read_i16(&buf[10..12]);
-
-                mint::Vector3::from([x, y, z])
-            };
-            let mag = {
-                let x = LittleEndian::read_i16(&buf[12..14]);
-                let y = LittleEndian::read_i16(&buf[14..16]);
-                let z = LittleEndian::read_i16(&buf[16..18]);
-
-                mint::Vector3::from([x, y, z])
-            };
-
-            Ok((accel, gyro, mag))
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
-    ///
-    /// Available only in modes in which accelerometer, gyroscope and magnetometer are enabled.
-    pub fn dof9(
-        &mut self,
-    ) -> Result<(mint::Vector3<f32>, mint::Vector3<f32>, mint::Vector3<f32>), Error<E>> {
-        let (accel, gyro, mag) = self.dof9_fixed()?;
-        Ok((
-            Self::scale_vec(accel, ACCEL_SCALING),
-            Self::scale_vec(gyro, GYRO_SCALING),
-            Self::scale_vec(mag, MAG_SCALING),
-        ))
-    }
-
-    /// Returns current accelerometer data in cm/s^2 units.
-    /// Available only in modes in which accelerometer is enabled.
-    pub fn accel_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
-        if self.mode.is_accel_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-            self.read_vec_raw(regs::BNO055_ACC_DATA_X_LSB)
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns current accelerometer data in m/s^2 units.
-    /// Available only in modes in which accelerometer is enabled.
-    pub fn accel_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
-        let a = self.accel_data_fixed()?;
-        // let scaling = 1f32 / 100f32; // 1 m/s^2 = 100 lsb
-        Ok(Self::scale_vec(a, ACCEL_SCALING))
-    }
-
-    /// Returns current gyroscope data in 1/16th deg/s units.
-    /// Available only in modes in which gyroscope is enabled.
-    pub fn gyro_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
-        if self.mode.is_gyro_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-            self.read_vec_raw(regs::BNO055_GYR_DATA_X_LSB)
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns current gyroscope data in deg/s units.
-    /// Available only in modes in which gyroscope is enabled.
-    pub fn gyro_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
-        let g = self.gyro_data_fixed()?;
-        // let scaling = 1f32 / 16f32; // 1 deg/s = 16 lsb
-        Ok(Self::scale_vec(g, GYRO_SCALING))
-    }
-
-    /// Returns current magnetometer data in 1/16th uT units.
-    /// Available only in modes in which magnetometer is enabled.
-    pub fn mag_data_fixed(&mut self) -> Result<mint::Vector3<i16>, Error<E>> {
-        if self.mode.is_mag_enabled() {
-            self.set_page(BNO055RegisterPage::PAGE_0)?;
-            self.read_vec_raw(regs::BNO055_MAG_DATA_X_LSB)
-        } else {
-            Err(Error::InvalidMode)
-        }
-    }
-
-    /// Returns current magnetometer data in uT units.
-    /// Available only in modes in which magnetometer is enabled.
-    pub fn mag_data(&mut self) -> Result<mint::Vector3<f32>, Error<E>> {
-        let m = self.mag_data_fixed()?;
-        // let scaling = 1f32 / 16f32; // 1 uT = 16 lsb
-        Ok(Self::scale_vec(m, MAG_SCALING))
-    }
-
-    /// Returns current temperature of the chip (in degrees Celsius).
-    ///
-    /// By default this uses the Accelerometer temperature.
-    pub fn temperature(&mut self) -> Result<i8, Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        // Read temperature signed byte
-        let temp = self.read_u8(regs::BNO055_TEMP).map_err(Error::I2c)? as i8;
-        Ok(temp)
-    }
-
-    /// Read which interrupts are currently triggered/active
-    pub fn interrupts_triggered(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        read_flags!(
-            self,
-            BNO055RegisterPage::PAGE_0,
-            regs::BNO055_INT_STA,
-            BNO055Interrupt
-        )
-    }
-
-    /// Resets the interrupts register and the INT pin
-    pub fn clear_interrupts(&mut self) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_0)?;
-        self.write_u8(
-            regs::BNO055_SYS_TRIGGER,
-            BNO055SystemTrigger::RST_INT.bits(),
-        )
-        .map_err(Error::I2c)?;
+        page: BNO055RegisterPage,
+        reg: u8,
+        x: T,
+    ) -> Result<(), Error<E>> {
+        self.set_page(page).await?;
+        self.write_u8(reg, x.into()).await?;
         Ok(())
     }
 
-    /// Sets which interrupts are enabled
-    ///
-    /// One of the only config options that dont need to be in config mode to write to
-    pub fn set_interrupts_enabled(&mut self, interrupts: BNO055Interrupt) -> Result<(), Error<E>> {
-        self.set_page(BNO055RegisterPage::PAGE_1)?;
-        self.write_u8(regs::BNO055_INT_EN, interrupts.bits())
-            .map_err(Error::I2c)
-    }
-
-    /// Returns currently enabled interrupts
-    pub fn interrupts_enabled(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        // self.set_page(BNO055RegisterPage::PAGE_0)?;
-
-        // let value = self
-        //     .read_u8(regs::BNO055_AXIS_MAP_CONFIG)
-        //     .map_err(Error::I2c)?;
-
-        // let remap = AxisRemap {
-        //     x: BNO055AxisConfig::from_bits_truncate(value & 0b11),
-        //     y: BNO055AxisConfig::from_bits_truncate((value >> 2) & 0b11),
-        //     z: BNO055AxisConfig::from_bits_truncate((value >> 4) & 0b11),
-        // };
-
-        // Ok(remap)
-
-        read_flags!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_INT_EN,
-            BNO055Interrupt
-        )
-    }
-
-    /// Sets interrupts mask
-    ///
-    /// Official doc: when mask=1, the interrupt will update INT_STA register and trigger a change in INT pin,
-    /// When mask=0, only INT_STA register will be updated
-    /// One of the only config options that dont need to be in config mode to write to
-    pub fn set_interrupts_mask(&mut self, mask: BNO055Interrupt) -> Result<(), Error<E>> {
-        // self.set_page(BNO055RegisterPage::PAGE_1)?;
-        // self.write_u8(
-        //     regs::BNO055_INT_MSK,
-        //     mask.bits(),
-        // )
-        // .map_err(Error::I2c)
-        write_flags!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK, mask)
-    }
-
-    /// Returns the current interrupts mask
-    pub fn interrupts_mask(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        read_flags!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_INT_MSK,
-            BNO055Interrupt
-        )
-    }
-
-    /// Returns current accelerometer config settings
-    // pub fn acc_config(&mut self) -> Result<AccConfig, Error<E>> {
-    //     read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_CONFIG)
-    // }
-
-    /// Sets accelerometer config settings
-    // pub fn set_acc_config(
-    //     &mut self,
-    //     cfg: AccConfig,
-    //     delay: &mut dyn DelayNs,
-    // ) -> Result<(), Error<E>> {
-    //     set_config_from!(
-    //         self,
-    //         BNO055RegisterPage::PAGE_1,
-    //         regs::BNO055_ACC_CONFIG,
-    //         cfg,
-    //         delay
-    //     )
-    // }
-
-    /// Sets accelerometer interrupt settings
-    pub fn set_acc_interrupt_settings(
+    /// Helper to set a configuration value, which requires switching to CONFIG_MODE
+    async fn set_config_from<T: Into<u8> + Send, D: DelayNs>(
         &mut self,
-        settings: BNO055AccIntSettings,
-        delay: &mut dyn DelayNs,
+        page: BNO055RegisterPage,
+        reg: u8,
+        x: T,
+        delay: &mut D,
     ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_INT_SETTING,
-            settings,
-            delay
-        )
+        let prev = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+        let res = self.set_u8_from(page, reg, x).await;
+        self.set_mode(prev, delay).await?;
+        res
     }
 
-    /// Returns current accelerometer interrupt settings
-    pub fn acc_interrupt_settings(&mut self) -> Result<BNO055AccIntSettings, Error<E>> {
-        read_u8_into!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_INT_SETTING
-        )
-        .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccIntSettings))
-    }
-
-    /// Sets accelerometer any motion interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn set_acc_am_threshold(
+    /// Helper to read a u8 value and convert it to a target type
+    async fn read_u8_into<T: FromPrimitive>(
         &mut self,
-        mult: u8,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_AM_THRES,
-            mult,
-            delay
-        )
+        page: BNO055RegisterPage,
+        reg: u8,
+    ) -> Result<Option<T>, Error<E>> {
+        self.set_page(page).await?;
+        let regval = self.read_u8(reg).await?;
+        Ok(T::from_u8(regval))
     }
 
-    /// Returns current accelerometer any motion interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn acc_am_threshold(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_AM_THRES)
-            .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccAmThreshold))
-    }
-
-    /// Sets accelerometer High-G interrupt duration setting
-    pub fn set_acc_hg_duration(
+    /// Helper to write bitflags to a register
+    async fn write_flags<F>(
         &mut self,
-        dur: u8,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_HG_DURATION,
-            dur,
-            delay
-        )
+        page: BNO055RegisterPage,
+        reg: u8,
+        flags: F,
+    ) -> Result<(), Error<E>>
+    where
+        F: bitflags::Flags<Bits = u8> + Send,
+    {
+        self.set_page(page).await?;
+        self.write_u8(reg, flags.bits()).await
     }
 
-    /// Returns current accelerometer High-G interrupt duration setting
-    pub fn acc_hg_duration(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_HG_DURATION
-        )
-        .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccHgDuration))
-    }
-
-    /// Sets accelerometer High-G interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn set_acc_hg_threshold(
+    /// Helper to write configuration bitflags, which requires switching to CONFIG_MODE
+    async fn write_config_flags<F, D>(
         &mut self,
-        mult: u8,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_HG_THRES,
-            mult,
-            delay
-        )
+        page: BNO055RegisterPage,
+        reg: u8,
+        flags: F,
+        delay: &mut D,
+    ) -> Result<(), Error<E>>
+    where
+        F: bitflags::Flags<Bits = u8> + Send,
+        D: DelayNs,
+    {
+        let prev = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+        let res = self.write_flags(page, reg, flags).await;
+        self.set_mode(prev, delay).await?;
+        res
     }
 
-    /// Returns current accelerometer High-G interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn acc_hg_threshold(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_HG_THRES)
-            .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccHgThreshold))
+    /// Helper to read bitflags from a register
+    async fn read_flags<F>(&mut self, page: BNO055RegisterPage, reg: u8) -> Result<F, Error<E>>
+    where
+        F: bitflags::Flags<Bits = u8>,
+    {
+        self.set_page(page).await?;
+        let bits = self.read_u8(reg).await?;
+        Ok(F::from_bits_truncate(bits))
     }
 
-    /// Sets accelerometer no/slow-motion interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn set_acc_nm_threshold(
-        &mut self,
-        mult: u8,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_NM_THRES,
-            mult,
-            delay
-        )
-    }
-
-    /// Returns current accelerometer no/slow-motion interrupt threshold setting
-    ///
-    /// Actual value is `mult` * base-unit based on accelerometer range set in ACC_CONFIG
-    pub fn acc_nm_threshold(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_THRES)
-            .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccNmThreshold))
-    }
-
-    /// Sets accelerometer no/slow-motion interrupt settings
-    pub fn set_acc_nm_settings(
-        &mut self,
-        settings: BNO055AccNmSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_ACC_NM_SET,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns current accelerometer no/slow-motion interrupt settings
-    pub fn acc_nm_settings(&mut self) -> Result<BNO055AccNmSettings, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_ACC_NM_SET)
-            .ok_or_else(|| Error::AccConfig(acc_config::Error::BadAccNmSettings))
-    }
-
-    /// Sets gyroscope interrupt settings
-    pub fn set_gyr_interrupt_settings(
-        &mut self,
-        settings: BNO055GyrIntSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        write_config_flags!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_INT_SETTING,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns the current gyroscope interrupt settings
-    pub fn gyr_interrupt_settings(&mut self) -> Result<BNO055GyrIntSettings, Error<E>> {
-        read_flags!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_INT_SETTING,
-            BNO055GyrIntSettings
-        )
-    }
-
-    /// Sets gyroscope high-rate interrupt settings for x-axis
-    pub fn set_gyr_hr_x_settings(
-        &mut self,
-        settings: BNO055GyrHrSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_HR_X_SET,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for x-axis
-    pub fn gyr_hr_x_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_X_SET)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrHrSettings))
-    }
-
-    /// Sets gyroscope high-rate interrupt duration for x-axis
-    ///
-    /// Actual duration is (`duration` + 1) * 2.5ms
-    pub fn set_gyr_dur_x(&mut self, duration: u8, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_DUR_X,
-            duration,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for x-axis
-    ///
-    /// Actual duration is (result + 1) * 2.5ms
-    pub fn gyr_dur_x(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_X)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrDurX))
-    }
-
-    /// Sets gyroscope high-rate interrupt settings for y-axis
-    pub fn set_gyr_hr_y_settings(
-        &mut self,
-        settings: BNO055GyrHrSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_HR_Y_SET,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for y-axis
-    pub fn gyr_hr_y_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Y_SET)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrHrYSettings))
-    }
-
-    /// Sets gyroscope high-rate interrupt duration for y-axis
-    ///
-    /// Actual duration is (`duration` + 1) * 2.5ms
-    pub fn set_gyr_dur_y(&mut self, duration: u8, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_DUR_Y,
-            duration,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for y-axis
-    ///
-    /// Actual duration is (result + 1) * 2.5ms
-    pub fn gyr_dur_y(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Y)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrDurY))
-    }
-
-    /// Sets gyroscope high-rate interrupt settings for z-axis
-    pub fn set_gyr_hr_z_settings(
-        &mut self,
-        settings: BNO055GyrHrSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_HR_Z_SET,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for z-axis
-    pub fn gyr_hr_z_settings(&mut self) -> Result<BNO055GyrHrSettings, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_HR_Z_SET)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrHrZSettings))
-    }
-
-    /// Sets gyroscope high-rate interrupt duration for z-axis
-    /// Actual duration is (`duration` + 1) * 2.5ms
-    pub fn set_gyr_dur_z(&mut self, duration: u8, delay: &mut dyn DelayNs) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_DUR_Z,
-            duration,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for z-axis
-    /// Actual duration is (result + 1) * 2.5ms
-    pub fn gyr_dur_z(&mut self) -> Result<u8, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Z)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrDurZ))
-    }
-
-    /// Sets gyroscope any-motion interrupt threshold
-    /// Actual value is `mult` * base-unit based on gyroscope range set in GYR_CONFIG_0
-    pub fn set_gyr_am_threshold(
-        &mut self,
-        mult: u8,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        let mut mult = mult;
-        if mult > 0b01111111 {
-            mult = 0b01111111;
-        }
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_DUR_Z,
-            mult & BIT_7_RESERVED_MASK,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope high-rate interrupt settings for z-axis
-    /// Actual value is `mult` * base-unit based on gyroscope range set in GYR_CONFIG_0
-    pub fn gyr_am_threshold(&mut self) -> Result<u8, Error<E>> {
-        let res: Result<u8, Error<E>> =
-            read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_DUR_Z)
-                .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrAmThreshold));
-        res.map(|mult| BIT_7_RESERVED_MASK & mult)
-    }
-
-    /// Sets gyroscope any-motion interrupt settings
-    pub fn set_gyr_am_settings(
-        &mut self,
-        settings: BNO055GyrAmSettings,
-        delay: &mut dyn DelayNs,
-    ) -> Result<(), Error<E>> {
-        set_config_from!(
-            self,
-            BNO055RegisterPage::PAGE_1,
-            regs::BNO055_GYR_AM_SET,
-            settings,
-            delay
-        )
-    }
-
-    /// Returns current gyroscope any-motion interrupt settings
-    pub fn gyr_am_settings(&mut self) -> Result<BNO055GyrAmSettings, Error<E>> {
-        read_u8_into!(self, BNO055RegisterPage::PAGE_1, regs::BNO055_GYR_AM_SET)
-            .ok_or_else(|| Error::GyroConfig(gyr_config::Error::BadGyrAmSettings))
-    }
-
-    #[inline(always)]
-    fn i2c_addr(&self) -> u8 {
-        if !self.use_default_addr {
-            regs::BNO055_ALTERNATE_ADDR
-        } else {
-            regs::BNO055_DEFAULT_ADDR
-        }
-    }
-
-    fn read_u8(&mut self, reg: u8) -> Result<u8, E> {
+    /// Low-level I2C read of a single u8
+    async fn read_u8(&mut self, reg: u8) -> Result<u8, Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
+        self.i2c
+            .write_read(self.i2c_addr(), &[reg], &mut byte)
+            .await
+            .map_err(Error::I2c)?;
 
-        match self.i2c.write_read(self.i2c_addr(), &[reg], &mut byte) {
-            Ok(_) => Ok(byte[0]),
-            Err(e) => Err(e),
-        }
+        Ok(byte[0])
     }
 
-    fn read_bytes(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), E> {
-        self.i2c.write_read(self.i2c_addr(), &[reg], buf)
+    /// Low-level I2C read of multiple bytes
+    async fn read_bytes(&mut self, reg: u8, buf: &mut [u8]) -> Result<(), Error<E>> {
+        (self.i2c.write_read(self.i2c_addr(), &[reg], buf).await).map_err(Error::I2c)
     }
 
-    fn write_u8(&mut self, reg: u8, value: u8) -> Result<(), E> {
-        self.i2c.write(self.i2c_addr(), &[reg, value])?;
+    /// Low-level I2C write of a single u8
+    async fn write_u8(&mut self, reg: u8, value: u8) -> Result<(), Error<E>> {
+        (self.i2c.write(self.i2c_addr(), &[reg, value]).await).map_err(Error::I2c)
+    }
 
-        Ok(())
+    /// Low-level I2C write of multiple bytes
+    async fn write_bytes(&mut self, reg: u8, values: &[u8]) -> Result<(), Error<E>> {
+        let mut buffer = [0u8; BNO055_CALIB_SIZE + 1];
+        buffer[0] = reg;
+        buffer[1..values.len() + 1].copy_from_slice(values);
+        (self
+            .i2c
+            .write(self.i2c_addr(), &buffer[..=values.len()])
+            .await)
+            .map_err(Error::I2c)
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055AxisConfig(u8);
-
 bitflags! {
-    /// BNO055 accelerometer interrupt settings
-    impl BNO055AxisConfig: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055AxisConfig: u8 {
         const AXIS_AS_X = 0b00;
         const AXIS_AS_Y = 0b01;
         const AXIS_AS_Z = 0b10;
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055AxisConfig {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "BNO055AxisConfig({})",
+            match self.bits() {
+                0b00 => "X",
+                0b01 => "Y",
+                0b10 => "Z",
+                _ => "Unknown",
+            }
+        )
     }
 }
 
@@ -1460,24 +1251,40 @@ impl AxisRemapBuilder {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055AxisSign(u8);
-
 bitflags! {
-    impl BNO055AxisSign: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055AxisSign: u8 {
         const X_NEGATIVE = 0b100;
         const Y_NEGATIVE = 0b010;
         const Z_NEGATIVE = 0b001;
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-/// SYS_STATUS 0x39
-pub struct BNO055SystemStatusCode(u8);
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055AxisSign {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(f, "BNO055AxisSign(");
+        if self.is_empty() {
+            defmt::write!(f, "Positive");
+        } else {
+            if self.contains(BNO055AxisSign::X_NEGATIVE) {
+                defmt::write!(f, "X_NEGATIVE ");
+            }
+            if self.contains(BNO055AxisSign::Y_NEGATIVE) {
+                defmt::write!(f, "Y_NEGATIVE ");
+            }
+            if self.contains(BNO055AxisSign::Z_NEGATIVE) {
+                defmt::write!(f, "Z_NEGATIVE ");
+            }
+        }
+        defmt::write!(f, ")");
+    }
+}
 
 bitflags! {
-    impl BNO055SystemStatusCode: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    /// SYS_STATUS 0x39
+    pub struct BNO055SystemStatusCode: u8 {
         /// 0 System idle
         const SYSTEM_IDLE = 0;
         /// 1 System Error
@@ -1498,29 +1305,26 @@ bitflags! {
 #[cfg(feature = "defmt-03")]
 impl defmt::Format for BNO055SystemStatusCode {
     fn format(&self, f: defmt::Formatter) {
-        // format the bitfields of the register as struct fields
         defmt::write!(
-           f,
-           "BNO055SystemStatusCode( {} )",
-           match self.bits() {
-            0 => "SystemIdle (0)",
-            1 => "SystemError (1)",
-            2 => "InitPeripherals (2)",
-            3 => "SystemInit (3)",
-            4 => "Executing (4)",
-            5 => "Running (5)",
-            6 => "RunningWithoutFusion (6)",
-            _ => defmt::unreachable!("Invalid System Status Code (SYS_STATUS)")
-           }
+            f,
+            "BNO055SystemStatusCode({})",
+            match self.bits() {
+                0 => "SystemIdle",
+                1 => "SystemError",
+                2 => "InitPeripherals",
+                3 => "SystemInit",
+                4 => "Executing",
+                5 => "Running",
+                6 => "RunningWithoutFusion",
+                _ => "Unknown",
+            }
         )
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055SystemErrorCode(u8);
 
 bitflags! {
-    impl BNO055SystemErrorCode: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055SystemErrorCode: u8 {
         const NONE = 0;
         const PERIPHERAL_INIT = 1;
         const SYSTEM_INIT = 2;
@@ -1534,16 +1338,62 @@ bitflags! {
         const SENSOR_CONFIG = 10;
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055SelfTestStatus(u8);
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055SystemErrorCode {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "BNO055SystemErrorCode({})",
+            match self.bits() {
+                0 => "None",
+                1 => "PeripheralInit",
+                2 => "SystemInit",
+                3 => "SelfTest",
+                4 => "RegisterMapValue",
+                5 => "RegisterMapAddress",
+                6 => "RegisterMapWrite",
+                7 => "LowPowerModeNotAvail",
+                8 => "AccelPowerModeNotAvail",
+                9 => "FusionAlgoConfig",
+                10 => "SensorConfig",
+                _ => "Unknown",
+            }
+        )
+    }
+}
 
 bitflags! {
-    impl BNO055SelfTestStatus: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055SelfTestStatus: u8 {
         const ACC_OK = 0b0001;
         const MAG_OK = 0b0010;
         const GYR_OK = 0b0100;
-        const SYS_OK = 0b1000;
+        const MCU_OK = 0b1000; // Corrected from SYS_OK to match datasheet
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055SelfTestStatus {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(f, "BNO055SelfTestStatus(");
+        if self.is_empty() {
+            defmt::write!(f, "None");
+        } else {
+            if self.contains(BNO055SelfTestStatus::ACC_OK) {
+                defmt::write!(f, "ACC_OK ");
+            }
+            if self.contains(BNO055SelfTestStatus::MAG_OK) {
+                defmt::write!(f, "MAG_OK ");
+            }
+            if self.contains(BNO055SelfTestStatus::GYR_OK) {
+                defmt::write!(f, "GYR_OK ");
+            }
+            if self.contains(BNO055SelfTestStatus::MCU_OK) {
+                defmt::write!(f, "MCU_OK ");
+            }
+        }
+        defmt::write!(f, ")");
     }
 }
 
@@ -1558,14 +1408,6 @@ pub struct BNO055SystemStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub struct BNO055Revision {
-    /// # Example
-    ///
-    /// For version 3.17
-    ///
-    /// ```rust
-    /// let version_reg: [u8; 2] = [3, 17];
-    /// assert_eq!(785_u16, u16::from_be_bytes(version_reg));
-    /// ```
     pub software: u16,
     pub bootloader: u8,
     pub accelerometer: u8,
@@ -1614,12 +1456,7 @@ impl BNO055Calibration {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe {
-            core::slice::from_raw_parts(
-                (self as *const _) as *const u8,
-                BNO055_CALIB_SIZE,
-            )
-        }
+        unsafe { core::slice::from_raw_parts((self as *const _) as *const u8, BNO055_CALIB_SIZE) }
     }
 }
 
@@ -1632,35 +1469,57 @@ pub struct BNO055CalibrationStatus {
     pub mag: u8,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055RegisterPage(u8);
-
 bitflags! {
-    impl  BNO055RegisterPage: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055RegisterPage: u8 {
         const PAGE_0 = 0;
         const PAGE_1 = 1;
     }
 }
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055PowerMode(u8);
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055RegisterPage {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "BNO055RegisterPage({})",
+            match self.bits() {
+                0 => "Page0",
+                1 => "Page1",
+                _ => "Unknown",
+            }
+        )
+    }
+}
 
 bitflags! {
-    impl BNO055PowerMode: u8 {
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055PowerMode: u8 {
         const NORMAL = 0b00;
         const LOW_POWER = 0b01;
         const SUSPEND = 0b10;
     }
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-pub struct BNO055OperationMode(u8);
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055PowerMode {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "BNO055PowerMode({})",
+            match self.bits() {
+                0b00 => "Normal",
+                0b01 => "LowPower",
+                0b10 => "Suspend",
+                _ => "Unknown",
+            }
+        )
+    }
+}
 
 bitflags! {
-    /// Possible BNO055 operation modes.
-    // #[cfg_attr(not(feature = "defmt-03"), derive(Debug, Clone, Copy, PartialEq, Eq))]
-    impl BNO055OperationMode: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BNO055OperationMode: u8 {
         const CONFIG_MODE = 0b0000;
         const ACC_ONLY = 0b0001;
         const MAG_ONLY = 0b0010;
@@ -1673,16 +1532,39 @@ bitflags! {
         const COMPASS = 0b1001;
         const M4G = 0b1010;
         const NDOF_FMC_OFF = 0b1011;
-        /// 3.3.3.5 NDOF
-        ///
-        /// This is a fusion mode with 9 degrees of freedom where the fused absolute orientation data is
-        /// calculated from accelerometer, gyroscope and the magnetometer. The advantages of
-        /// combining all three sensors are a fast calculation, resulting in high output data rate, and high
-        /// robustness from magnetic field distortions. In this mode the Fast Magnetometer calibration is
-        /// turned ON and thereby resulting in quick calibration of the magnetometer and higher output
-        /// data accuracy. The current consumption is slightly higher in comparison to the
-        /// NDOF_FMC_OFF fusion mode.
         const NDOF = 0b1100;
+    }
+}
+
+impl Default for BNO055OperationMode {
+    fn default() -> Self {
+        Self::CONFIG_MODE
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055OperationMode {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(
+            f,
+            "BNO055OperationMode({})",
+            match self.bits() {
+                0b0000 => "ConfigMode",
+                0b0001 => "AccOnly",
+                0b0010 => "MagOnly",
+                0b0011 => "GyroOnly",
+                0b0100 => "AccMag",
+                0b0101 => "AccGyro",
+                0b0110 => "MagGyro",
+                0b0111 => "Amg",
+                0b1000 => "Imu",
+                0b1001 => "Compass",
+                0b1010 => "M4g",
+                0b1011 => "NdofFmcOff",
+                0b1100 => "Ndof",
+                _ => "Unknown",
+            }
+        )
     }
 }
 
@@ -1737,14 +1619,10 @@ impl BNO055OperationMode {
     }
 }
 
-#[derive(num_derive::FromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-#[repr(transparent)]
-pub struct BNO055Interrupt(pub u8);
-
 bitflags! {
-    /// BNO055 interrupt enable/mask flags.
-    impl BNO055Interrupt: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    // #[derive(num_derive::FromPrimitive)]
+    pub struct BNO055Interrupt: u8 {
         const ACC_NM = 0b10000000;
         const ACC_AM = 0b01000000;
         const ACC_HIGH_G = 0b00100000;
@@ -1756,14 +1634,60 @@ bitflags! {
     }
 }
 
-/// `SYS_TRIGGER` ([`regs::BNO055_SYS_TRIGGER`]) register values.
-#[derive(num_derive::FromPrimitive, Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-#[repr(transparent)]
-pub struct BNO055SystemTrigger(pub u8);
+impl FromPrimitive for BNO055Interrupt {
+    fn from_i64(n: i64) -> Option<Self> {
+        Self::from_u8(n as u8)
+    }
+
+    fn from_u64(n: u64) -> Option<Self> {
+        Self::from_u8(n as u8)
+    }
+
+    fn from_u8(n: u8) -> Option<Self> {
+        BNO055Interrupt::from_bits(n)
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055Interrupt {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(f, "BNO055Interrupt(");
+        if self.is_empty() {
+            defmt::write!(f, "None");
+        } else {
+            if self.contains(BNO055Interrupt::ACC_NM) {
+                defmt::write!(f, "ACC_NM ");
+            }
+            if self.contains(BNO055Interrupt::ACC_AM) {
+                defmt::write!(f, "ACC_AM ");
+            }
+            if self.contains(BNO055Interrupt::ACC_HIGH_G) {
+                defmt::write!(f, "ACC_HIGH_G ");
+            }
+            if self.contains(BNO055Interrupt::GYR_DRDY) {
+                defmt::write!(f, "GYR_DRDY ");
+            }
+            if self.contains(BNO055Interrupt::GYR_HIGH_RATE) {
+                defmt::write!(f, "GYR_HIGH_RATE ");
+            }
+            if self.contains(BNO055Interrupt::GYRO_AM) {
+                defmt::write!(f, "GYRO_AM ");
+            }
+            if self.contains(BNO055Interrupt::MAG_DRDY) {
+                defmt::write!(f, "MAG_DRDY ");
+            }
+            if self.contains(BNO055Interrupt::ACC_BSX_DRDY) {
+                defmt::write!(f, "ACC_BSX_DRDY ");
+            }
+        }
+        defmt::write!(f, ")");
+    }
+}
 
 bitflags! {
-    impl BNO055SystemTrigger: u8 {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    // #[derive(num_derive::FromPrimitive)]
+    pub struct BNO055SystemTrigger: u8 {
         /// Select External Clock
         const EXT_CLK_SEL = 0b1000_0000;
         /// Clear interrupts command
@@ -1772,6 +1696,44 @@ bitflags! {
         const RST_SYS = 0b0010_0000;
         /// Self-test command
         const SELF_TEST = 0b0000_0001;
+    }
+}
+
+impl FromPrimitive for BNO055SystemTrigger {
+    fn from_i64(n: i64) -> Option<Self> {
+        Self::from_u8(n as u8)
+    }
+
+    fn from_u64(n: u64) -> Option<Self> {
+        Self::from_u8(n as u8)
+    }
+
+    fn from_u8(n: u8) -> Option<Self> {
+        BNO055SystemTrigger::from_bits(n)
+    }
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055SystemTrigger {
+    fn format(&self, f: defmt::Formatter) {
+        defmt::write!(f, "BNO055SystemTrigger(");
+        if self.is_empty() {
+            defmt::write!(f, "None");
+        } else {
+            if self.contains(BNO055SystemTrigger::EXT_CLK_SEL) {
+                defmt::write!(f, "EXT_CLK_SEL ");
+            }
+            if self.contains(BNO055SystemTrigger::RST_INT) {
+                defmt::write!(f, "RST_INT ");
+            }
+            if self.contains(BNO055SystemTrigger::RST_SYS) {
+                defmt::write!(f, "RST_SYS ");
+            }
+            if self.contains(BNO055SystemTrigger::SELF_TEST) {
+                defmt::write!(f, "SELF_TEST ");
+            }
+        }
+        defmt::write!(f, ")");
     }
 }
 
@@ -1793,8 +1755,10 @@ mod tests {
         assert!((BNO055Interrupt::all()).contains(BNO055Interrupt::MAG_DRDY));
         assert!((BNO055Interrupt::all()).contains(BNO055Interrupt::ACC_BSX_DRDY));
 
-        assert!(BNO055Interrupt(0b10011).contains(BNO055Interrupt::ACC_BSX_DRDY));
-        assert!(BNO055Interrupt(0b10011).contains(BNO055Interrupt::GYR_DRDY));
-        assert!(BNO055Interrupt(0b10011).contains(BNO055Interrupt::MAG_DRDY));
+        assert!(
+            BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::ACC_BSX_DRDY)
+        );
+        assert!(BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::GYR_DRDY));
+        assert!(!BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::MAG_DRDY));
     }
 }

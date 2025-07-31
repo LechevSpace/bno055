@@ -1,7 +1,6 @@
-use bitflags::bitflags;
+ use core::convert::TryFrom;
 
-// use num_derive::FromPrimitive;
-// use num_traits::FromPrimitive;
+use bitflags::bitflags;
 
 use crate::BIT_7_RESERVED_MASK;
 
@@ -19,7 +18,6 @@ pub enum Error {
     BadGyrAmSettings,
 }
 
-
 bitflags! {
     /// BNO055 gyroscope interrupt settings
     #[cfg_attr(not(feature = "defmt-03"), derive(Debug, Clone, Copy, PartialEq, Eq))]
@@ -32,6 +30,32 @@ bitflags! {
         const AM_Z_AXIS = 0b00000100;
         const AM_Y_AXIS = 0b00000010;
         const AM_X_AXIS = 0b00000001;
+    }
+}
+
+impl TryFrom<u8> for BNO055GyrIntSettings {
+    type Error = ();
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::from_bits(value).ok_or(())
+    }
+}
+
+impl num_traits::FromPrimitive for BNO055GyrIntSettings {
+    fn from_u8(regval: u8) -> Option<Self> {
+        Self::try_from(regval).ok()
+    }
+
+    fn from_i64(n: i64) -> Option<Self> {
+        u8::try_from(n)
+            .ok()
+            .and_then(|val| Self::try_from(val).ok())
+    }
+
+    fn from_u64(n: u64) -> Option<Self> {
+        u8::try_from(n)
+            .ok()
+            .and_then(|val| Self::try_from(val).ok())
     }
 }
 
