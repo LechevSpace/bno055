@@ -26,7 +26,6 @@ pub enum Error {
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum GyrRange {
     /// Default value as per "Table 3-7: Default sensor configuration at power-on"
@@ -38,8 +37,20 @@ pub enum GyrRange {
     Dps125 = 0b100,
 }
 
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for GyrRange {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            GyrRange::Dps2000 => defmt::write!(f, "2000 dps"),
+            GyrRange::Dps1000 => defmt::write!(f, "1000 dps"),
+            GyrRange::Dps500 => defmt::write!(f, "500 dps"),
+            GyrRange::Dps250 => defmt::write!(f, "250 dps"),
+            GyrRange::Dps125 => defmt::write!(f, "125 dps"),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum GyrBandwidth {
     Hz523 = 0b000,
@@ -54,8 +65,23 @@ pub enum GyrBandwidth {
     Hz32 = 0b111,
 }
 
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for GyrBandwidth {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            GyrBandwidth::Hz523 => defmt::write!(f, "523 Hz"),
+            GyrBandwidth::Hz230 => defmt::write!(f, "230 Hz"),
+            GyrBandwidth::Hz116 => defmt::write!(f, "116 Hz"),
+            GyrBandwidth::Hz47 => defmt::write!(f, "47 Hz"),
+            GyrBandwidth::Hz23 => defmt::write!(f, "23 Hz"),
+            GyrBandwidth::Hz12 => defmt::write!(f, "12 Hz"),
+            GyrBandwidth::Hz64 => defmt::write!(f, "64 Hz"),
+            GyrBandwidth::Hz32 => defmt::write!(f, "32 Hz"),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum GyrPowerMode {
     /// Default value as per "Table 3-7: Default sensor configuration at power-on"
@@ -65,6 +91,19 @@ pub enum GyrPowerMode {
     DeepSuspend = 0b010,
     Suspend = 0b011,
     AdvancedPowerSave = 0b100,
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for GyrPowerMode {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            GyrPowerMode::Normal => defmt::write!(f, "Normal"),
+            GyrPowerMode::FastPowerUp => defmt::write!(f, "Fast Power Up"),
+            GyrPowerMode::DeepSuspend => defmt::write!(f, "Deep Suspend"),
+            GyrPowerMode::Suspend => defmt::write!(f, "Suspend"),
+            GyrPowerMode::AdvancedPowerSave => defmt::write!(f, "Advanced Power Save"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

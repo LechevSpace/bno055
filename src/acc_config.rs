@@ -28,7 +28,6 @@ pub enum Error {
 }
 
 #[derive(FromPrimitive, Default, Debug, Clone, Copy)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 #[allow(clippy::unusual_byte_groupings)]
 pub enum AccGRange {
@@ -45,8 +44,21 @@ pub enum AccGRange {
     G8 = 0b000_000_10,
     G16 = 0b000_000_11,
 }
+
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for AccGRange {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            AccGRange::G2 => defmt::write!(f, "2G"),
+            AccGRange::G4 => defmt::write!(f, "4G"),
+            AccGRange::G8 => defmt::write!(f, "8G"),
+            AccGRange::G16 => defmt::write!(f, "16G"),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 #[allow(clippy::unusual_byte_groupings)]
 pub enum AccBandwidth {
@@ -68,8 +80,23 @@ pub enum AccBandwidth {
     Hz1000 = 0b000_111_00,
 }
 
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for AccBandwidth {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            AccBandwidth::Hz7_81 => defmt::write!(f, "7.81 Hz"),
+            AccBandwidth::Hz15_63 => defmt::write!(f, "15.63 Hz"),
+            AccBandwidth::Hz31_25 => defmt::write!(f, "31.25 Hz"),
+            AccBandwidth::Hz62_5 => defmt::write!(f, "62.5 Hz"),
+            AccBandwidth::Hz125 => defmt::write!(f, "125 Hz"),
+            AccBandwidth::Hz250 => defmt::write!(f, "250 Hz"),
+            AccBandwidth::Hz500 => defmt::write!(f, "500 Hz"),
+            AccBandwidth::Hz1000 => defmt::write!(f, "1000 Hz"),
+        }
+    }
+}
+
 #[derive(Default, Debug, Clone, Copy, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 #[allow(clippy::unusual_byte_groupings)]
 pub enum AccOperationMode {
@@ -81,6 +108,21 @@ pub enum AccOperationMode {
     Standby = 0b011_000_00,
     LowPower2 = 0b100_000_00,
     DeepSuspend = 0b101_000_00,
+}
+
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for AccOperationMode {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            AccOperationMode::Normal => defmt::write!(f, "Normal"),
+            AccOperationMode::Suspend => defmt::write!(f, "Suspend"),
+            AccOperationMode::LowPower1 => defmt::write!(f, "LowPower1"),
+            AccOperationMode::Standby => defmt::write!(f, "Standby"),
+            AccOperationMode::LowPower2 => defmt::write!(f, "LowPower2"),
+            AccOperationMode::DeepSuspend => defmt::write!(f, "DeepSuspend"),
+        }
+    }
 }
 
 #[derive(Default, Debug, Clone)]

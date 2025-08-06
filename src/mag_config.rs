@@ -12,7 +12,6 @@ pub enum Error {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum MagDataRate {
     Hz2 = 0b000,
@@ -25,8 +24,23 @@ pub enum MagDataRate {
     Hz30 = 0b111,
 }
 
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for MagDataRate {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            MagDataRate::Hz2 => defmt::write!(f, "2 Hz"),
+            MagDataRate::Hz6 => defmt::write!(f, "6 Hz"),
+            MagDataRate::Hz8 => defmt::write!(f, "8 Hz"),
+            MagDataRate::Hz10 => defmt::write!(f, "10 Hz"),
+            MagDataRate::Hz15 => defmt::write!(f, "15 Hz"),
+            MagDataRate::Hz20 => defmt::write!(f, "20 Hz"),
+            MagDataRate::Hz25 => defmt::write!(f, "25 Hz"),
+            MagDataRate::Hz30 => defmt::write!(f, "30 Hz"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum MagOperationMode {
     LowPower = 0b00,
@@ -35,14 +49,37 @@ pub enum MagOperationMode {
     HighAccuracy = 0b11,
 }
 
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for MagOperationMode {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            MagOperationMode::LowPower => defmt::write!(f, "Low Power"),
+            MagOperationMode::Regular => defmt::write!(f, "Regular"),
+            MagOperationMode::EnhancedRegular => defmt::write!(f, "Enhanced Regular"),
+            MagOperationMode::HighAccuracy => defmt::write!(f, "High Accuracy"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[repr(u8)]
 pub enum MagPowerMode {
     Normal = 0b00,
     Sleep = 0b01,
     Suspend = 0b10,
     ForceMode = 0b11,
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for MagPowerMode {
+    fn format(&self, f: defmt::Formatter) {
+        match self {
+            MagPowerMode::Normal => defmt::write!(f, "Normal"),
+            MagPowerMode::Sleep => defmt::write!(f, "Sleep"),
+            MagPowerMode::Suspend => defmt::write!(f, "Suspend"),
+            MagPowerMode::ForceMode => defmt::write!(f, "Force Mode"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,8 +135,10 @@ impl MagConfig {
 
     pub fn from_bits(bits: u8) -> Result<Self, Error> {
         let data_rate = MagDataRate::from_u8(bits & 0b111).ok_or(Error::InvalidMagDataRate)?;
-        let op_mode = MagOperationMode::from_u8((bits >> 3) & 0b11).ok_or(Error::InvalidMagOperationMode)?;
-        let power_mode = MagPowerMode::from_u8((bits >> 5) & 0b11).ok_or(Error::InvalidMagPowerMode)?;
+        let op_mode =
+            MagOperationMode::from_u8((bits >> 3) & 0b11).ok_or(Error::InvalidMagOperationMode)?;
+        let power_mode =
+            MagPowerMode::from_u8((bits >> 5) & 0b11).ok_or(Error::InvalidMagPowerMode)?;
         Ok(Self {
             data_rate,
             op_mode,
