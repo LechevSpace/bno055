@@ -1,6 +1,7 @@
 //! BNO055 Magnetometer Configuration
 
 use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
 
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]

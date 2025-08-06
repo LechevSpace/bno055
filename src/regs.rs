@@ -138,4 +138,5 @@ pub(crate) const BNO055_GYR_AM_SET: u8 = 0x1F;
 /// Sensor config
 pub(crate) const BNO055_ACC_CONFIG: u8 = 0x08;
 pub(crate) const BNO055_MAG_CONFIG: u8 = 0x09;
-pub(crate) const BNO055_GYR_CONFIG: u8 = 0x0A;
+pub(crate) const BNO055_GYR_CONFIG_0: u8 = 0x0A;
+pub(crate) const BNO055_GYR_CONFIG_1: u8 = 0x0A;
