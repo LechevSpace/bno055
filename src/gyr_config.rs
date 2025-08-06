@@ -1,6 +1,10 @@
- use core::convert::TryFrom;
+//! BNO055 Gyroscope Configuration
+
+use core::convert::TryFrom;
 
 use bitflags::bitflags;
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
 
 use crate::BIT_7_RESERVED_MASK;
 
@@ -8,6 +12,9 @@ use crate::BIT_7_RESERVED_MASK;
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
+    InvalidGyrRange,
+    InvalidGyrBandwidth,
+    InvalidGyrPowerMode,
     BadGyrHrSettings,
     BadGyrDurX,
     BadGyrHrYSettings,
@@ -16,6 +23,114 @@ pub enum Error {
     BadGyrDurZ,
     BadGyrAmThreshold,
     BadGyrAmSettings,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[repr(u8)]
+pub enum GyrRange {
+    /// Default value as per "Table 3-7: Default sensor configuration at power-on"
+    #[default]
+    Dps2000 = 0b000,
+    Dps1000 = 0b001,
+    Dps500 = 0b010,
+    Dps250 = 0b011,
+    Dps125 = 0b100,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[repr(u8)]
+pub enum GyrBandwidth {
+    Hz523 = 0b000,
+    Hz230 = 0b001,
+    Hz116 = 0b010,
+    Hz47 = 0b011,
+    Hz23 = 0b100,
+    Hz12 = 0b101,
+    Hz64 = 0b110,
+    /// Default value as per "Table 3-7: Default sensor configuration at power-on"
+    #[default]
+    Hz32 = 0b111,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, FromPrimitive)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[repr(u8)]
+pub enum GyrPowerMode {
+    /// Default value as per "Table 3-7: Default sensor configuration at power-on"
+    #[default]
+    Normal = 0b000,
+    FastPowerUp = 0b001,
+    DeepSuspend = 0b010,
+    Suspend = 0b011,
+    AdvancedPowerSave = 0b100,
+}
+
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+pub struct GyrConfig {
+    range: GyrRange,
+    bandwidth: GyrBandwidth,
+    power_mode: GyrPowerMode,
+}
+
+impl Default for GyrConfig {
+    fn default() -> Self {
+        Self {
+            range: GyrRange::Dps2000,
+            bandwidth: GyrBandwidth::Hz32,
+            power_mode: GyrPowerMode::Normal,
+        }
+    }
+}
+
+impl GyrConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn set_range(&mut self, range: GyrRange) {
+        self.range = range;
+    }
+
+    pub fn range(&self) -> GyrRange {
+        self.range
+    }
+
+    pub fn set_bandwidth(&mut self, bw: GyrBandwidth) {
+        self.bandwidth = bw;
+    }
+
+    pub fn bandwidth(&self) -> GyrBandwidth {
+        self.bandwidth
+    }
+
+    pub fn set_power_mode(&mut self, mode: GyrPowerMode) {
+        self.power_mode = mode;
+    }
+
+    pub fn power_mode(&self) -> GyrPowerMode {
+        self.power_mode
+    }
+
+    pub fn to_bits(&self) -> (u8, u8) {
+        let bits0 = ((self.bandwidth as u8) << 3) | (self.range as u8);
+        let bits1 = self.power_mode as u8;
+        (bits0, bits1)
+    }
+
+    pub fn from_bits(bits0: u8, bits1: u8) -> Result<Self, Error> {
+        let range = GyrRange::from_u8(bits0 & 0b111).ok_or(Error::InvalidGyrRange)?;
+        let bandwidth =
+            GyrBandwidth::from_u8((bits0 >> 3) & 0b111).ok_or(Error::InvalidGyrBandwidth)?;
+        let power_mode = GyrPowerMode::from_u8(bits1 & 0b111).ok_or(Error::InvalidGyrPowerMode)?;
+        Ok(Self {
+            range,
+            bandwidth,
+            power_mode,
+        })
+    }
 }
 
 bitflags! {

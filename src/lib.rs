@@ -28,11 +28,12 @@ use num_traits::FromPrimitive;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-mod acc_config;
-mod gyr_config;
+pub mod acc_config;
+pub mod gyr_config;
+pub mod mag_config;
 mod regs;
 #[cfg(feature = "std")]
-mod std;
+pub mod std;
 
 #[doc(inline)]
 pub use acc_config::{
@@ -41,7 +42,10 @@ pub use acc_config::{
 #[doc(inline)]
 pub use gyr_config::{
     BNO055GyrAmSettings, BNO055GyrHrSettings, BNO055GyrIntSettings, GyrAmSamplesAwake,
+    GyrBandwidth, GyrConfig, GyrPowerMode, GyrRange,
 };
+#[doc(inline)]
+pub use mag_config::{MagConfig, MagDataRate, MagOperationMode, MagPowerMode};
 #[doc(inline)]
 pub use regs::BNO055_ID;
 
@@ -72,6 +76,9 @@ pub enum Error<E> {
 
     /// Gyroscope configuration error
     GyroConfig(gyr_config::Error),
+
+    /// Magnetometer configuration error
+    MagConfig(mag_config::Error),
 }
 
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
@@ -428,6 +435,38 @@ where
     pub async fn set_acc_config(&mut self, acc_config: &AccConfig) -> Result<(), Error<E>> {
         self.set_page(BNO055RegisterPage::PAGE_1).await?;
         self.write_u8(regs::BNO055_ACC_CONFIG, acc_config.bits())
+            .await?;
+        Ok(())
+    }
+
+    /// Returns the current gyroscope config
+    pub async fn get_gyr_config(&mut self) -> Result<GyrConfig, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let bits0 = self.read_u8(regs::BNO055_GYR_CONFIG_0).await?;
+        let bits1 = self.read_u8(regs::BNO055_GYR_CONFIG_1).await?;
+        GyrConfig::from_bits(bits0, bits1).map_err(Error::GyroConfig)
+    }
+
+    /// Sets the gyroscope config
+    pub async fn set_gyr_config(&mut self, gyr_config: &GyrConfig) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let (bits0, bits1) = gyr_config.to_bits();
+        self.write_u8(regs::BNO055_GYR_CONFIG_0, bits0).await?;
+        self.write_u8(regs::BNO055_GYR_CONFIG_1, bits1).await?;
+        Ok(())
+    }
+
+    /// Returns the current magnetometer config
+    pub async fn get_mag_config(&mut self) -> Result<MagConfig, Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let bits = self.read_u8(regs::BNO055_MAG_CONFIG).await?;
+        MagConfig::from_bits(bits).map_err(Error::MagConfig)
+    }
+
+    /// Sets the magnetometer config
+    pub async fn set_mag_config(&mut self, mag_config: &MagConfig) -> Result<(), Error<E>> {
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        self.write_u8(regs::BNO055_MAG_CONFIG, mag_config.to_bits())
             .await?;
         Ok(())
     }
@@ -1089,11 +1128,11 @@ where
     /// Low-level I2C read of a single u8
     async fn read_u8(&mut self, reg: u8) -> Result<u8, Error<E>> {
         let mut byte: [u8; 1] = [0; 1];
-        self.i2c
+        (self
+            .i2c
             .write_read(self.i2c_addr(), &[reg], &mut byte)
-            .await
+            .await)
             .map_err(Error::I2c)?;
-
         Ok(byte[0])
     }
 
@@ -1621,7 +1660,7 @@ impl BNO055OperationMode {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    // #[derive(num_derive::FromPrimitive)]
+    #[derive(num_derive::FromPrimitive)]
     pub struct BNO055Interrupt: u8 {
         const ACC_NM = 0b10000000;
         const ACC_AM = 0b01000000;
@@ -1631,20 +1670,6 @@ bitflags! {
         const GYRO_AM = 0b00000100;
         const MAG_DRDY = 0b00000010;
         const ACC_BSX_DRDY = 0b00000001;
-    }
-}
-
-impl FromPrimitive for BNO055Interrupt {
-    fn from_i64(n: i64) -> Option<Self> {
-        Self::from_u8(n as u8)
-    }
-
-    fn from_u64(n: u64) -> Option<Self> {
-        Self::from_u8(n as u8)
-    }
-
-    fn from_u8(n: u8) -> Option<Self> {
-        BNO055Interrupt::from_bits(n)
     }
 }
 
@@ -1686,7 +1711,7 @@ impl defmt::Format for BNO055Interrupt {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    // #[derive(num_derive::FromPrimitive)]
+    #[derive(num_derive::FromPrimitive)]
     pub struct BNO055SystemTrigger: u8 {
         /// Select External Clock
         const EXT_CLK_SEL = 0b1000_0000;
@@ -1696,20 +1721,6 @@ bitflags! {
         const RST_SYS = 0b0010_0000;
         /// Self-test command
         const SELF_TEST = 0b0000_0001;
-    }
-}
-
-impl FromPrimitive for BNO055SystemTrigger {
-    fn from_i64(n: i64) -> Option<Self> {
-        Self::from_u8(n as u8)
-    }
-
-    fn from_u64(n: u64) -> Option<Self> {
-        Self::from_u8(n as u8)
-    }
-
-    fn from_u8(n: u8) -> Option<Self> {
-        BNO055SystemTrigger::from_bits(n)
     }
 }
 
