@@ -1660,7 +1660,6 @@ impl BNO055OperationMode {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[derive(num_derive::FromPrimitive)]
     pub struct BNO055Interrupt: u8 {
         const ACC_NM = 0b10000000;
         const ACC_AM = 0b01000000;
@@ -1670,6 +1669,23 @@ bitflags! {
         const GYRO_AM = 0b00000100;
         const MAG_DRDY = 0b00000010;
         const ACC_BSX_DRDY = 0b00000001;
+    }
+}
+
+impl FromPrimitive for BNO055Interrupt {
+    /// Converts an i64 to a `BNO055Interrupt` if it's a valid bit pattern.
+    fn from_i64(n: i64) -> Option<Self> {
+        u8::from_i64(n).and_then(Self::from_bits)
+    }
+
+    /// Converts a u64 to a `BNO055Interrupt` if it's a valid bit pattern.
+    fn from_u64(n: u64) -> Option<Self> {
+        u8::from_u64(n).and_then(Self::from_bits)
+    }
+
+    /// Converts a u8 to a `BNO055Interrupt` if it's a valid bit pattern.
+    fn from_u8(n: u8) -> Option<Self> {
+        Self::from_bits(n)
     }
 }
 
@@ -1711,7 +1727,6 @@ impl defmt::Format for BNO055Interrupt {
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[derive(num_derive::FromPrimitive)]
     pub struct BNO055SystemTrigger: u8 {
         /// Select External Clock
         const EXT_CLK_SEL = 0b1000_0000;
@@ -1721,6 +1736,23 @@ bitflags! {
         const RST_SYS = 0b0010_0000;
         /// Self-test command
         const SELF_TEST = 0b0000_0001;
+    }
+}
+
+impl FromPrimitive for BNO055SystemTrigger {
+    /// Converts an i64 to a `BNO055SystemTrigger` if it's a valid bit pattern.
+    fn from_i64(n: i64) -> Option<Self> {
+        u8::from_i64(n).and_then(Self::from_bits)
+    }
+
+    /// Converts a u64 to a `BNO055SystemTrigger` if it's a valid bit pattern.
+    fn from_u64(n: u64) -> Option<Self> {
+        u8::from_u64(n).and_then(Self::from_bits)
+    }
+
+    /// Converts a u8 to a `BNO055SystemTrigger` if it's a valid bit pattern.
+    fn from_u8(n: u8) -> Option<Self> {
+        Self::from_bits(n)
     }
 }
 

@@ -67,7 +67,7 @@ pub enum GyrPowerMode {
     AdvancedPowerSave = 0b100,
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub struct GyrConfig {
     range: GyrRange,
