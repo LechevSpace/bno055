@@ -432,10 +432,19 @@ where
     }
 
     /// Sets the accelerometer config
-    pub async fn set_acc_config(&mut self, acc_config: &AccConfig) -> Result<(), Error<E>> {
+    pub async fn set_acc_config<D: DelayNs>(
+        &mut self,
+        acc_config: &AccConfig,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        let prev_mode = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         self.set_page(BNO055RegisterPage::PAGE_1).await?;
         self.write_u8(regs::BNO055_ACC_CONFIG, acc_config.bits())
             .await?;
+        self.set_mode(prev_mode, delay).await?;
+
         Ok(())
     }
 
@@ -448,11 +457,20 @@ where
     }
 
     /// Sets the gyroscope config
-    pub async fn set_gyr_config(&mut self, gyr_config: &GyrConfig) -> Result<(), Error<E>> {
+    pub async fn set_gyr_config<D: DelayNs>(
+        &mut self,
+        gyr_config: &GyrConfig,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        let prev_mode = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         self.set_page(BNO055RegisterPage::PAGE_1).await?;
         let (bits0, bits1) = gyr_config.to_bits();
         self.write_u8(regs::BNO055_GYR_CONFIG_0, bits0).await?;
         self.write_u8(regs::BNO055_GYR_CONFIG_1, bits1).await?;
+        self.set_mode(prev_mode, delay).await?;
+
         Ok(())
     }
 
@@ -464,10 +482,19 @@ where
     }
 
     /// Sets the magnetometer config
-    pub async fn set_mag_config(&mut self, mag_config: &MagConfig) -> Result<(), Error<E>> {
+    pub async fn set_mag_config<D: DelayNs>(
+        &mut self,
+        mag_config: &MagConfig,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        let prev_mode = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
         self.set_page(BNO055RegisterPage::PAGE_1).await?;
         self.write_u8(regs::BNO055_MAG_CONFIG, mag_config.to_bits())
             .await?;
+        self.set_mode(prev_mode, delay).await?;
+
         Ok(())
     }
 
@@ -632,45 +659,85 @@ where
 
     /// Read which interrupts are currently triggered/active
     pub async fn interrupts_triggered(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        self.read_flags(BNO055RegisterPage::PAGE_0, regs::BNO055_INT_STA)
-            .await
+        self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        let bits = self.read_u8(regs::BNO055_INT_STA).await?;
+        Ok(BNO055Interrupt::from_u8(bits).unwrap_or_default())
+        // self.read_flags(BNO055RegisterPage::PAGE_0, regs::BNO055_INT_STA)
+        //     .await
     }
 
-    /// Resets the interrupts register and the INT pin
+    /// Resets the interrupts register and the INT pin.
+    /// 
     pub async fn clear_interrupts(&mut self) -> Result<(), Error<E>> {
         self.set_page(BNO055RegisterPage::PAGE_0).await?;
+        // We need to fetch the SYS_TRIG first as the external clock bit might be set.
+        let sys_trig = self.read_u8(regs::BNO055_SYS_TRIGGER).await?;
         self.write_u8(
             regs::BNO055_SYS_TRIGGER,
-            BNO055SystemTrigger::RST_INT.bits(),
+            sys_trig | BNO055SystemTrigger::RST_INT.bits(),
         )
         .await
+        // self.write_flags(
+        //     BNO055RegisterPage::PAGE_0,
+        //     regs::BNO055_SYS_TRIGGER,
+        //     BNO055SystemTrigger::RST_INT,
+        // )
+        // .await
     }
 
-    /// Sets which interrupts are enabled
-    pub async fn set_interrupts_enabled(
+    /// Sets which interrupts are enabled, overrides all current interrupts
+    pub async fn set_interrupts_enabled<D: DelayNs>(
         &mut self,
         interrupts: BNO055Interrupt,
+        delay: &mut D,
     ) -> Result<(), Error<E>> {
-        self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN, interrupts)
-            .await
+        let prev_mode = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        self.write_u8(regs::BNO055_INT_EN, interrupts.bits())
+            .await?;
+        // self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN, interrupts)
+        //     .await?;
+
+        self.set_mode(prev_mode, delay).await
     }
 
     /// Returns currently enabled interrupts
     pub async fn interrupts_enabled(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN)
-            .await
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let bits = self.read_u8(regs::BNO055_INT_EN).await?;
+        Ok(BNO055Interrupt::from_u8(bits).unwrap_or_default())
+        // self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_EN)
+        //     .await
     }
 
     /// Sets interrupts mask
-    pub async fn set_interrupts_mask(&mut self, mask: BNO055Interrupt) -> Result<(), Error<E>> {
-        self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK, mask)
-            .await
+    pub async fn set_interrupts_mask<D: DelayNs>(
+        &mut self,
+        mask: BNO055Interrupt,
+        delay: &mut D,
+    ) -> Result<(), Error<E>> {
+        let prev_mode = self.mode;
+        self.set_mode(BNO055OperationMode::CONFIG_MODE, delay)
+            .await?;
+
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        self.write_u8(regs::BNO055_INT_MSK, mask.bits()).await?;
+        // self.write_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK, mask)
+        //     .await
+
+        self.set_mode(prev_mode, delay).await
     }
 
     /// Returns the current interrupts mask
     pub async fn interrupts_mask(&mut self) -> Result<BNO055Interrupt, Error<E>> {
-        self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK)
-            .await
+        self.set_page(BNO055RegisterPage::PAGE_1).await?;
+        let bits = self.read_u8(regs::BNO055_INT_MSK).await?;
+        Ok(BNO055Interrupt::from_u8(bits).unwrap_or_default())
+        // self.read_flags(BNO055RegisterPage::PAGE_1, regs::BNO055_INT_MSK)
+        //     .await
     }
 
     /// Sets accelerometer interrupt settings
@@ -1445,13 +1512,25 @@ pub struct BNO055SystemStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+// #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub struct BNO055Revision {
     pub software: u16,
     pub bootloader: u8,
     pub accelerometer: u8,
     pub magnetometer: u8,
     pub gyroscope: u8,
+}
+
+#[cfg(feature = "defmt-03")]
+impl defmt::Format for BNO055Revision {
+    fn format(&self, f: defmt::Formatter) {
+        let [major, minor] = self.software.to_be_bytes();
+        defmt::write!(
+            f,
+            "BNO055Revision {{ software: {=u8}.{=u8}, bootloader: {=u8}, accelerometer: {=u8}, magnetometer: {=u8}, gyroscope: {=u8} }}",
+            major, minor, self.bootloader, self.accelerometer, self.magnetometer, self.gyroscope
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1659,7 +1738,7 @@ impl BNO055OperationMode {
 }
 
 bitflags! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
     pub struct BNO055Interrupt: u8 {
         const ACC_NM = 0b10000000;
         const ACC_AM = 0b01000000;
