@@ -2,9 +2,9 @@ name: Rust
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
   pull_request:
-    branches: [ master ]
+    branches: [master]
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,7 +19,7 @@ jobs:
           submodules: true
       - uses: dtolnay/rust-toolchain@nightly
         with:
-            components: rustfmt, clippy, rust-docs
+          components: rustfmt, clippy, rust-docs
 
       - name: Rustfmt lints
         run: cargo fmt --all -- --check
@@ -60,19 +60,12 @@ jobs:
         run: cargo build --examples
       - name: Run tests
         run: cargo test
+      # Cargo binstall currently installs musl binary and requires additional setup.
       - name: Install cargo-fuzz
         if: ${{ matrix.rust == 'nightly' }}
-        # pre-build binaries
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      - name: Install musl-tools on Linux
-        if: ${{ matrix.rust == 'nightly' }}
-        run: sudo apt-get update --yes && sudo apt-get install --yes musl-tools
+        run: cargo +nightly install cargo-fuzz
       - name: Fuzz (nightly only)
         if: ${{ matrix.rust == 'nightly' }}
-        env:
-          RUSTFLAGS: "-C target-feature=-crt-static"
         run: |
           cargo +nightly fuzz run init -- -max_total_time=900
           cargo +nightly fuzz run calibrate -- -max_total_time=1800
