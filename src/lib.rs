@@ -3,7 +3,8 @@
 #![allow(clippy::bad_bit_mask)]
 
 //! Bosch Sensortec BNO055 9-axis IMU sensor driver.
-//! Datasheet: https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BNO055-DS000.pdf
+//!
+//! Datasheet: <https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf>
 
 #[cfg(all(feature = "blocking", feature = "async"))]
 compile_error!("Features 'blocking' and 'async' cannot be enabled at the same time.");
