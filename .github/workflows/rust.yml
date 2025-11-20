@@ -61,10 +61,14 @@ jobs:
       - name: Run tests
         run: cargo test
       - name: Install cargo-fuzz
+        if: ${{ matrix.rust == 'nightly' }}
         # pre-build binaries
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
+      - name: Install musl-tools on Linux
+        if: ${{ matrix.rust == 'nightly' }}
+        run: sudo apt-get update --yes && sudo apt-get install --yes musl-tools
       - name: Fuzz (nightly only)
         if: ${{ matrix.rust == 'nightly' }}
         env:
