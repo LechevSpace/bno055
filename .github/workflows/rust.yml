@@ -38,7 +38,7 @@ jobs:
           - stable
           - beta
           - nightly
-          - "1.65" # MSRV
+          - "1.80" # MSRV
 
     steps:
       - name: Checkout Sources
@@ -54,10 +54,10 @@ jobs:
         run: cargo build --features "std"
       - name: Build - serde
         run: cargo build --features "serde"
-      - name: Build - defmt-03
-        run: cargo build --features "defmt-03"
-      - name: Build - examples
-        run: cargo build --examples
+      - name: Build - defmt
+        run: cargo build --features "defmt"
+      - name: Build - examples (blocking)
+        run: cargo build --examples --no-default-features -F blocking
       - name: Run tests
         run: cargo test
       # Cargo binstall currently installs musl binary and requires additional setup.
