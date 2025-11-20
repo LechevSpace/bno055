@@ -42,7 +42,7 @@ std = []
 async = ["dep:embedded-hal-async"]
 blocking = ["maybe-async/is_sync"]
 
-defmt-03 = ["dep:defmt", "embedded-hal/defmt-03"]
+defmt = ["dep:defmt", "embedded-hal/defmt-03"]
 serde = ["dep:serde", "mint/serde"]
 
 [dev-dependencies]
