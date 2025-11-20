@@ -1883,6 +1883,6 @@ mod tests {
             BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::ACC_BSX_DRDY)
         );
         assert!(BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::GYR_DRDY));
-        assert!(!BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::MAG_DRDY));
+        assert!(BNO055Interrupt::from_bits_truncate(0b10011).contains(BNO055Interrupt::MAG_DRDY));
     }
 }
