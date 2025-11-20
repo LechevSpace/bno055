@@ -562,6 +562,7 @@ where
     }
 
     /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
+    #[allow(clippy::type_complexity)]
     pub async fn dof9_fixed(
         &mut self,
     ) -> Result<(mint::Vector3<i16>, mint::Vector3<i16>, mint::Vector3<i16>), Error<E>> {
@@ -594,6 +595,7 @@ where
     }
 
     /// Returns Acceleration, Gyroscope and Magnetometer vectors in this order.
+    #[allow(clippy::type_complexity)]
     pub async fn dof9(
         &mut self,
     ) -> Result<(mint::Vector3<f32>, mint::Vector3<f32>, mint::Vector3<f32>), Error<E>> {
