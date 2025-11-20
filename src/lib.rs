@@ -667,7 +667,7 @@ where
     }
 
     /// Resets the interrupts register and the INT pin.
-    /// 
+    ///
     pub async fn clear_interrupts(&mut self) -> Result<(), Error<E>> {
         self.set_page(BNO055RegisterPage::PAGE_0).await?;
         // We need to fetch the SYS_TRIG first as the external clock bit might be set.

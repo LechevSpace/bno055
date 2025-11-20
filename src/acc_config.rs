@@ -33,7 +33,7 @@ pub enum Error {
 pub enum AccGRange {
     G2 = 0b000_000_00,
     /// 4G is the default value in the register on Reset.
-    /// 
+    ///
     /// Table 3-4: Default sensor settings
     /// Sensor Range Bandwidth
     /// Accelerometer 4G 62.5 Hz
@@ -44,7 +44,6 @@ pub enum AccGRange {
     G8 = 0b000_000_10,
     G16 = 0b000_000_11,
 }
-
 
 #[cfg(feature = "defmt-03")]
 impl defmt::Format for AccGRange {
@@ -109,7 +108,6 @@ pub enum AccOperationMode {
     LowPower2 = 0b100_000_00,
     DeepSuspend = 0b101_000_00,
 }
-
 
 #[cfg(feature = "defmt-03")]
 impl defmt::Format for AccOperationMode {
@@ -231,13 +229,13 @@ impl From<u8> for BNO055AccIntSettings {
     }
 }
 
-impl Into<u8> for BNO055AccIntSettings {
-    fn into(self) -> u8 {
-        let mut dur = self.am_dur;
+impl From<BNO055AccIntSettings> for u8 {
+    fn from(val: BNO055AccIntSettings) -> Self {
+        let mut dur = val.am_dur;
         if dur > 3 {
             dur = 3;
         }
-        self.flags.bits() | dur
+        val.flags.bits() | dur
     }
 }
 
@@ -274,21 +272,18 @@ impl From<u8> for BNO055AccNmSettings {
     fn from(regval: u8) -> Self {
         Self {
             dur: (regval & 0b01111110) >> 1,
-            is_no_motion: match regval & 1 {
-                0 => false,
-                _ => true,
-            },
+            is_no_motion: !matches!(regval & 1, 0),
         }
     }
 }
 
-impl Into<u8> for BNO055AccNmSettings {
-    fn into(self) -> u8 {
-        let mut dur = self.dur;
+impl From<BNO055AccNmSettings> for u8 {
+    fn from(val: BNO055AccNmSettings) -> Self {
+        let mut dur = val.dur;
         if dur > 0b111111 {
             dur = 0b111111;
         }
-        let is_no_motion = match self.is_no_motion {
+        let is_no_motion = match val.is_no_motion {
             true => 1,
             false => 0,
         };

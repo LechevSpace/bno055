@@ -216,7 +216,6 @@ impl num_traits::FromPrimitive for BNO055GyrIntSettings {
 /// Gyroscope High Rate interrupt settings
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-
 pub struct BNO055GyrHrSettings {
     /// `hysteresis` in [0, 0b11]. Actual value is `hysteresis` * base-unit based on gyroscope range set in GYR_CONFIG
     pub hysteresis: u8,
@@ -253,13 +252,13 @@ impl From<u8> for BNO055GyrHrSettings {
     }
 }
 
-impl Into<u8> for BNO055GyrHrSettings {
-    fn into(self) -> u8 {
-        let mut hysteresis = self.hysteresis;
+impl From<BNO055GyrHrSettings> for u8 {
+    fn from(val: BNO055GyrHrSettings) -> Self {
+        let mut hysteresis = val.hysteresis;
         if hysteresis > 0b11 {
             hysteresis = 0b11;
         }
-        let mut threshold = self.threshold;
+        let mut threshold = val.threshold;
         if threshold > 0b11111 {
             threshold = 0b11111;
         }
@@ -270,7 +269,6 @@ impl Into<u8> for BNO055GyrHrSettings {
 /// Gyroscope Any Motion interrupt settings
 #[derive(Debug)]
 #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
-
 pub struct BNO055GyrAmSettings {
     pub awake_duration: GyrAmSamplesAwake,
     /// `slope_samples` in [0, 0b11]. Actual value is (`slope_samples` + 1) * 4
@@ -306,13 +304,13 @@ impl From<u8> for BNO055GyrAmSettings {
     }
 }
 
-impl Into<u8> for BNO055GyrAmSettings {
-    fn into(self) -> u8 {
-        let mut slope_samples = self.slope_samples;
+impl From<BNO055GyrAmSettings> for u8 {
+    fn from(val: BNO055GyrAmSettings) -> Self {
+        let mut slope_samples = val.slope_samples;
         if slope_samples > 0b11 {
             slope_samples = 0b11;
         }
-        let awake_duration: u8 = self.awake_duration.into();
+        let awake_duration: u8 = val.awake_duration.into();
         0b00001111 & (awake_duration | slope_samples)
     }
 }
@@ -338,13 +336,13 @@ impl From<u8> for GyrAmSamplesAwake {
     }
 }
 
-impl Into<u8> for GyrAmSamplesAwake {
-    fn into(self) -> u8 {
-        match self {
-            Self::Samples8 => 0,
-            Self::Samples16 => 1,
-            Self::Samples32 => 2,
-            Self::Samples64 => 3,
+impl From<GyrAmSamplesAwake> for u8 {
+    fn from(val: GyrAmSamplesAwake) -> Self {
+        match val {
+            GyrAmSamplesAwake::Samples8 => 0,
+            GyrAmSamplesAwake::Samples16 => 1,
+            GyrAmSamplesAwake::Samples32 => 2,
+            GyrAmSamplesAwake::Samples64 => 3,
         }
     }
 }

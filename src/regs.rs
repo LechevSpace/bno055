@@ -88,7 +88,7 @@ pub(crate) const BNO055_TEMP_SOURCE: u8 = 0x40;
 pub(crate) const BNO055_AXIS_MAP_CONFIG: u8 = 0x41;
 pub(crate) const BNO055_AXIS_MAP_SIGN: u8 = 0x42;
 
-/// Calibration data
+// Calibration data
 
 pub(crate) const BNO055_ACC_OFFSET_X_LSB: u8 = 0x55;
 pub(crate) const BNO055_ACC_OFFSET_X_MSB: u8 = 0x56;
@@ -116,7 +116,8 @@ pub(crate) const BNO055_ACC_RADIUS_MSB: u8 = 0x68;
 pub(crate) const BNO055_MAG_RADIUS_LSB: u8 = 0x69;
 pub(crate) const BNO055_MAG_RADIUS_MSB: u8 = 0x6A;
 
-/// Interrupts
+// Interrupts
+
 pub(crate) const BNO055_INT_MSK: u8 = 0x0F;
 pub(crate) const BNO055_INT_EN: u8 = 0x10;
 pub(crate) const BNO055_ACC_AM_THRES: u8 = 0x11;
