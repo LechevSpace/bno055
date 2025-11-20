@@ -13,7 +13,7 @@ const ACC_BANDWIDTH_MASK: u8 = 0b000_111_00;
 const ACC_OPERATION_MODE_MASK: u8 = 0b111_000_00;
 
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
     BadAccGRange,
@@ -45,7 +45,7 @@ pub enum AccGRange {
     G16 = 0b000_000_11,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for AccGRange {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -79,7 +79,7 @@ pub enum AccBandwidth {
     Hz1000 = 0b000_111_00,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for AccBandwidth {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -109,7 +109,7 @@ pub enum AccOperationMode {
     DeepSuspend = 0b101_000_00,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for AccOperationMode {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -124,7 +124,7 @@ impl defmt::Format for AccOperationMode {
 }
 
 #[derive(Default, Debug, Clone)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AccConfig {
     g_range: AccGRange,
     bandwidth: AccBandwidth,
@@ -176,7 +176,7 @@ impl AccConfig {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055AccIntSettingsFlags(u8);
 
 bitflags! {
@@ -193,7 +193,7 @@ bitflags! {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+// #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055AccIntSettings {
     pub flags: BNO055AccIntSettingsFlags,
     /// `am_dur` in [0, 3]
@@ -240,7 +240,7 @@ impl From<BNO055AccIntSettings> for u8 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055AccNmSettings {
     /// `dur` in [0, 0b111111]. Details of how actual duration is calculated in official doc
     pub dur: u8,

@@ -4,7 +4,7 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error {
     InvalidMagDataRate,
     InvalidMagOperationMode,
@@ -24,7 +24,7 @@ pub enum MagDataRate {
     Hz30 = 0b111,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for MagDataRate {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -49,7 +49,7 @@ pub enum MagOperationMode {
     HighAccuracy = 0b11,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for MagOperationMode {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -70,7 +70,7 @@ pub enum MagPowerMode {
     ForceMode = 0b11,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for MagPowerMode {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -83,7 +83,7 @@ impl defmt::Format for MagPowerMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct MagConfig {
     data_rate: MagDataRate,
     op_mode: MagOperationMode,

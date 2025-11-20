@@ -9,7 +9,7 @@ use num_traits::FromPrimitive;
 use crate::BIT_7_RESERVED_MASK;
 
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
     InvalidGyrRange,
@@ -37,7 +37,7 @@ pub enum GyrRange {
     Dps125 = 0b100,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for GyrRange {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -65,7 +65,7 @@ pub enum GyrBandwidth {
     Hz32 = 0b111,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for GyrBandwidth {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -93,7 +93,7 @@ pub enum GyrPowerMode {
     AdvancedPowerSave = 0b100,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for GyrPowerMode {
     fn format(&self, f: defmt::Formatter) {
         match self {
@@ -107,7 +107,7 @@ impl defmt::Format for GyrPowerMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct GyrConfig {
     range: GyrRange,
     bandwidth: GyrBandwidth,
@@ -174,7 +174,7 @@ impl GyrConfig {
 
 bitflags! {
     /// BNO055 gyroscope interrupt settings
-    #[cfg_attr(not(feature = "defmt-03"), derive(Debug, Clone, Copy, PartialEq, Eq))]
+    #[cfg_attr(not(feature = "defmt"), derive(Debug, Clone, Copy, PartialEq, Eq))]
     pub struct BNO055GyrIntSettings: u8 {
         const HR_FILT = 0b10000000;
         const AM_FILT = 0b01000000;
@@ -215,7 +215,7 @@ impl num_traits::FromPrimitive for BNO055GyrIntSettings {
 
 /// Gyroscope High Rate interrupt settings
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055GyrHrSettings {
     /// `hysteresis` in [0, 0b11]. Actual value is `hysteresis` * base-unit based on gyroscope range set in GYR_CONFIG
     pub hysteresis: u8,
@@ -268,7 +268,7 @@ impl From<BNO055GyrHrSettings> for u8 {
 
 /// Gyroscope Any Motion interrupt settings
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055GyrAmSettings {
     pub awake_duration: GyrAmSamplesAwake,
     /// `slope_samples` in [0, 0b11]. Actual value is (`slope_samples` + 1) * 4
@@ -316,7 +316,7 @@ impl From<BNO055GyrAmSettings> for u8 {
 }
 
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum GyrAmSamplesAwake {
     Samples8,
     Samples16,

@@ -40,12 +40,23 @@ If your microcontroller is faster in starting up you might have to delay before 
 By default, this crate is `no_std` compatible. However, you can enable `std` features by enabling the `std` feature flag.
 At the moment this only adds `std::error::Error` trait implementation for the `Error` type.
 
+### `blocking`
+Enables the blocking API but cannot enable it with the `async` features.
+Use `default-features = false` to disable `async`.
+
+### `async` (default)
+Enables the async API based on `embedded-hal-async@1` and cannot be enabled if `blocking` is enabled as well.
+
 ### `serde`
 
 The `serde` flag adds implementation of `Serialize` / `Deserialize` to `BNO055Calibration`.
 
 **Note:** `serde` itself is `no_std` compatible, however not all serializers are (e.g. `serde-json` is not but `serde-json-core` is),
 so be careful that you're not enabling `serde`'s `std` feature by accident (see [here](https://serde.rs/no-std.html#no-std-support) for a complete explanation).
+
+## `defmt`
+The `defmt` flag adds implementation of `defmt::Format` to most structures and enums.
+
 
 ## Usage
 

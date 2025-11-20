@@ -36,7 +36,7 @@ embedded-hal-async = { version = "1.0", optional = true }
 maybe-async = "0.2"
 
 [features]
-default = ["defmt-03", "blocking"]
+default = ["async"]
 std = []
 
 async = ["dep:embedded-hal-async"]
@@ -47,3 +47,7 @@ serde = ["dep:serde", "mint/serde"]
 
 [dev-dependencies]
 linux-embedded-hal = { version = "0.4", features = ["async-tokio"] }
+
+[[example]]
+name = "calibrate"
+required-features = ["blocking"]

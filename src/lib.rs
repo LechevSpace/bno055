@@ -5,6 +5,9 @@
 //! Bosch Sensortec BNO055 9-axis IMU sensor driver.
 //! Datasheet: https://ae-bst.resource.bosch.com/media/_tech/media/datasheets/BST-BNO055-DS000.pdf
 
+#[cfg(all(feature = "blocking", feature = "async"))]
+compile_error!("Features 'blocking' and 'async' cannot be enabled at the same time.");
+
 // Use maybe_async to toggle between blocking and async implementations
 use maybe_async::maybe_async;
 
@@ -60,7 +63,7 @@ pub const MAG_SCALING: f32 = 1f32 / 16f32;
 
 /// All possible errors in this crate
 #[derive(Debug)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum Error<E> {
     /// I2C bus error
     I2c(E),
@@ -81,7 +84,7 @@ pub enum Error<E> {
     MagConfig(mag_config::Error),
 }
 
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Bno055<I> {
     i2c: I,
     pub mode: BNO055OperationMode,
@@ -1237,7 +1240,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055AxisConfig {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1269,7 +1272,7 @@ impl AxisRemap {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct AxisRemap {
     x: BNO055AxisConfig,
     y: BNO055AxisConfig,
@@ -1368,7 +1371,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055AxisSign {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(f, "BNO055AxisSign(");
@@ -1410,7 +1413,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055SystemStatusCode {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1447,7 +1450,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055SystemErrorCode {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1481,7 +1484,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055SelfTestStatus {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(f, "BNO055SelfTestStatus(");
@@ -1489,16 +1492,16 @@ impl defmt::Format for BNO055SelfTestStatus {
             defmt::write!(f, "None");
         } else {
             if self.contains(BNO055SelfTestStatus::ACC_OK) {
-                defmt::write!(f, "ACC_OK ");
+                defmt::write!(f, "ACC_OK");
             }
             if self.contains(BNO055SelfTestStatus::MAG_OK) {
-                defmt::write!(f, "MAG_OK ");
+                defmt::write!(f, "MAG_OK");
             }
             if self.contains(BNO055SelfTestStatus::GYR_OK) {
-                defmt::write!(f, "GYR_OK ");
+                defmt::write!(f, "GYR_OK");
             }
             if self.contains(BNO055SelfTestStatus::MCU_OK) {
-                defmt::write!(f, "MCU_OK ");
+                defmt::write!(f, "MCU_OK");
             }
         }
         defmt::write!(f, ")");
@@ -1506,15 +1509,14 @@ impl defmt::Format for BNO055SelfTestStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055SystemStatus {
-    status: BNO055SystemStatusCode,
-    selftest: Option<BNO055SelfTestStatus>,
-    error: BNO055SystemErrorCode,
+    pub status: BNO055SystemStatusCode,
+    pub selftest: Option<BNO055SelfTestStatus>,
+    pub error: BNO055SystemErrorCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// #[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
 pub struct BNO055Revision {
     pub software: u16,
     pub bootloader: u8,
@@ -1523,7 +1525,7 @@ pub struct BNO055Revision {
     pub gyroscope: u8,
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055Revision {
     fn format(&self, f: defmt::Formatter) {
         let [major, minor] = self.software.to_be_bytes();
@@ -1537,7 +1539,7 @@ impl defmt::Format for BNO055Revision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 #[repr(C)]
 pub struct BNO055Calibration {
     pub acc_offset_x_lsb: u8,
@@ -1581,7 +1583,7 @@ impl BNO055Calibration {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt-03", derive(defmt::Format))]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct BNO055CalibrationStatus {
     pub sys: u8,
     pub gyr: u8,
@@ -1597,7 +1599,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055RegisterPage {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1621,7 +1623,7 @@ bitflags! {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055PowerMode {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1662,7 +1664,7 @@ impl Default for BNO055OperationMode {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055OperationMode {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(
@@ -1770,7 +1772,7 @@ impl FromPrimitive for BNO055Interrupt {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055Interrupt {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(f, "BNO055Interrupt(");
@@ -1837,7 +1839,7 @@ impl FromPrimitive for BNO055SystemTrigger {
     }
 }
 
-#[cfg(feature = "defmt-03")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for BNO055SystemTrigger {
     fn format(&self, f: defmt::Formatter) {
         defmt::write!(f, "BNO055SystemTrigger(");

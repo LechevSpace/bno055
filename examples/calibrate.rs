@@ -1,6 +1,16 @@
+//! Run calibration using linux i2c-0 device.
+//! `linux_embedded_hal::I2cdev` doesn't support `async`.
+//!
+//! `cargo run --example calibrate --no-default-features -F blocking`
+//!
+//! Make sure to run the necessary steps to allow the IMU to auto-calibrate.
+//! See Datasheet section 3.11 Page 51, https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bno055-ds000.pdf (As of 2021-07-02)
 use bno055::{BNO055OperationMode, Bno055};
 use linux_embedded_hal::{Delay, I2cdev};
 use mint::{EulerAngles, Quaternion};
+
+#[cfg(not(feature = "blocking"))]
+compile_error!("You must disable default features and enable 'blocking' to run the example: 'cargo run --example calibrate --no-default-features -F blocking'");
 
 fn main() {
     let dev = I2cdev::new("/dev/i2c-0").unwrap();
