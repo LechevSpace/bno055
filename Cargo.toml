@@ -36,7 +36,7 @@ embedded-hal-async = { version = "1.0", optional = true }
 maybe-async = "0.2"
 
 [features]
-default = ["defmt-03", "async"]
+default = ["defmt-03", "blocking"]
 std = []
 
 async = ["dep:embedded-hal-async"]
@@ -46,4 +46,4 @@ defmt-03 = ["dep:defmt", "embedded-hal/defmt-03"]
 serde = ["dep:serde", "mint/serde"]
 
 [dev-dependencies]
-linux-embedded-hal = "0.4"
+linux-embedded-hal = { version = "0.4", features = ["async-tokio"] }
